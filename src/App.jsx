@@ -27,6 +27,12 @@ const stocks = [
 
 const STORAGE_KEY = 'stock-investment-state'
 
+async function hashUserPin(pin, userId) {
+  const pinBytes = new TextEncoder().encode(`${userId}:${pin}`)
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', pinBytes)
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
 function getPriceHistory(stock) {
   if (!stock) return []
 
@@ -110,6 +116,14 @@ function App() {
   const [fundingAmount, setFundingAmount] = useState('')
   const [fundingStep, setFundingStep] = useState('amount')
   const [paymentMethod, setPaymentMethod] = useState('')
+  const [savedPinHash, setSavedPinHash] = useState('')
+  const [pin, setPin] = useState('')
+  const [pinConfirmation, setPinConfirmation] = useState('')
+  const [pinError, setPinError] = useState('')
+  const [wrongPinAttempts, setWrongPinAttempts] = useState(0)
+  const [pinLockUntil, setPinLockUntil] = useState(0)
+  const [pinLockRemaining, setPinLockRemaining] = useState(0)
+  const [isSavingPin, setIsSavingPin] = useState(false)
   const [buyError, setBuyError] = useState({})
   const [selectedSymbol, setSelectedSymbol] = useState(null)
   const [chartMode, setChartMode] = useState('line')
@@ -149,6 +163,24 @@ function App() {
       // Storage can be unavailable or full; the app remains usable for this session.
     }
   }, [walletBalance, portfolio, watchlist])
+
+  useEffect(() => {
+    if (!pinLockUntil) return undefined
+
+    const updateLockRemaining = () => {
+      const remaining = Math.max(0, Math.ceil((pinLockUntil - Date.now()) / 1000))
+      setPinLockRemaining(remaining)
+      if (remaining === 0) {
+        setPinLockUntil(0)
+        setWrongPinAttempts(0)
+        setPinError('')
+      }
+    }
+
+    updateLockRemaining()
+    const intervalId = window.setInterval(updateLockRemaining, 1000)
+    return () => window.clearInterval(intervalId)
+  }, [pinLockUntil])
 
   useEffect(() => {
     if (!isMenuOpen) return undefined
@@ -243,6 +275,32 @@ function App() {
     setFundingStep('method')
   }
 
+  const checkFundingPin = async (event) => {
+    event.preventDefault()
+    if (!user?.id || !paymentMethod) return
+
+    setFundingStep('pin-checking')
+    setPinError('')
+
+    try {
+      const { data, error } = await supabase
+        .from('user_pins')
+        .select('pin_hash')
+        .eq('user_id', user.id)
+        .maybeSingle()
+
+      if (error) throw error
+
+      setSavedPinHash(data?.pin_hash ?? '')
+      setPin('')
+      setPinConfirmation('')
+      setFundingStep(data?.pin_hash ? 'pin-enter' : 'pin-create')
+    } catch (error) {
+      setPinError(error instanceof Error ? error.message : 'Could not check your PIN.')
+      setFundingStep('method')
+    }
+  }
+
   const fundWallet = () => {
     const amount = Number(fundingAmount)
     if (amount <= 0 || !paymentMethod) return
@@ -251,11 +309,74 @@ function App() {
     setFundingStep('success')
   }
 
+  const createFundingPin = async (event) => {
+    event.preventDefault()
+    if (!/^\d{4}$/.test(pin) || pin !== pinConfirmation || !user?.id) return
+
+    setIsSavingPin(true)
+    setPinError('')
+
+    try {
+      const pinHash = await hashUserPin(pin, user.id)
+      const { error } = await supabase
+        .from('user_pins')
+        .insert({ user_id: user.id, pin_hash: pinHash })
+
+      if (error) throw error
+
+      setSavedPinHash(pinHash)
+      fundWallet()
+    } catch (error) {
+      setPinError(error instanceof Error ? error.message : 'Could not save your PIN.')
+    } finally {
+      setIsSavingPin(false)
+    }
+  }
+
+  const verifyFundingPin = async (event) => {
+    event.preventDefault()
+    if (!/^\d{4}$/.test(pin) || pinLockRemaining > 0) return
+
+    setPinError('')
+
+    try {
+      const enteredPinHash = await hashUserPin(pin, user.id)
+      if (enteredPinHash === savedPinHash) {
+        setWrongPinAttempts(0)
+        setPin('')
+        fundWallet()
+        return
+      }
+
+      const attempts = wrongPinAttempts + 1
+      setWrongPinAttempts(attempts)
+      setPin('')
+      setPinError('Incorrect PIN')
+      if (attempts >= 3) {
+        setPinLockUntil(Date.now() + 60000)
+        setPinLockRemaining(60)
+      }
+    } catch {
+      setPinError('Could not verify your PIN. Please try again.')
+    }
+  }
+
+  const returnToPaymentMethod = () => {
+    setPin('')
+    setPinConfirmation('')
+    setPinError('')
+    setFundingStep('method')
+  }
+
   const closeFunding = () => {
     setIsFunding(false)
     setFundingStep('amount')
     setPaymentMethod('')
     setFundingAmount('')
+    setSavedPinHash('')
+    setPin('')
+    setPinConfirmation('')
+    setPinError('')
   }
 
   const handleAuthSuccess = async () => {
@@ -516,7 +637,7 @@ function App() {
               )}
 
               {fundingStep === 'method' && (
-                <form className="fund-payment-step" onSubmit={(event) => { event.preventDefault(); fundWallet() }}>
+                <form className="fund-payment-step" onSubmit={checkFundingPin}>
                   <p className="fund-amount-summary">
                     Amount being added <strong>${Number(fundingAmount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
                   </p>
@@ -545,6 +666,86 @@ function App() {
                     </button>
                     <button type="submit" className="confirm-button" disabled={!paymentMethod}>
                       Continue
+                    </button>
+                  </div>
+                  {pinError && <p className="fund-pin-error" role="alert">{pinError}</p>}
+                </form>
+              )}
+
+              {fundingStep === 'pin-checking' && (
+                <p className="fund-pin-status" role="status">Checking your PIN setup...</p>
+              )}
+
+              {fundingStep === 'pin-create' && (
+                <form className="fund-pin-step" onSubmit={createFundingPin}>
+                  <p className="fund-pin-title">Create your PIN</p>
+                  <label htmlFor="funding-pin">Enter a 4-digit PIN</label>
+                  <input
+                    id="funding-pin"
+                    className="fund-pin-input"
+                    type="password"
+                    inputMode="numeric"
+                    pattern="[0-9]{4}"
+                    maxLength={4}
+                    autoComplete="new-password"
+                    value={pin}
+                    onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                    required
+                    disabled={isSavingPin}
+                  />
+                  <label htmlFor="funding-pin-confirm">Confirm your PIN</label>
+                  <input
+                    id="funding-pin-confirm"
+                    className="fund-pin-input"
+                    type="password"
+                    inputMode="numeric"
+                    pattern="[0-9]{4}"
+                    maxLength={4}
+                    autoComplete="new-password"
+                    value={pinConfirmation}
+                    onChange={(event) => setPinConfirmation(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                    required
+                    disabled={isSavingPin}
+                  />
+                  {pinError && <p className="fund-pin-error" role="alert">{pinError}</p>}
+                  <div className="fund-pin-actions">
+                    <button type="button" className="fund-back-button" onClick={returnToPaymentMethod} disabled={isSavingPin}>Back</button>
+                    <button
+                      type="submit"
+                      className="confirm-button"
+                      disabled={isSavingPin || pin.length !== 4 || pinConfirmation.length !== 4 || pin !== pinConfirmation}
+                    >
+                      {isSavingPin ? 'Saving...' : 'Save PIN'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {fundingStep === 'pin-enter' && (
+                <form className="fund-pin-step" onSubmit={verifyFundingPin}>
+                  <p className="fund-pin-title">Enter your 4-digit secret PIN</p>
+                  <label htmlFor="funding-pin">Enter your PIN</label>
+                  <input
+                    id="funding-pin"
+                    className="fund-pin-input"
+                    type="password"
+                    inputMode="numeric"
+                    pattern="[0-9]{4}"
+                    maxLength={4}
+                    autoComplete="current-password"
+                    value={pin}
+                    onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                    required
+                    disabled={pinLockRemaining > 0}
+                  />
+                  {pinError && <p className="fund-pin-error" role="alert">{pinError}</p>}
+                  {pinLockRemaining > 0 && (
+                    <p className="fund-pin-status" role="status">Try again in {pinLockRemaining} seconds.</p>
+                  )}
+                  <div className="fund-pin-actions">
+                    <button type="button" className="fund-back-button" onClick={returnToPaymentMethod}>Back</button>
+                    <button type="submit" className="confirm-button" disabled={pin.length !== 4 || pinLockRemaining > 0}>
+                      Verify PIN
                     </button>
                   </div>
                 </form>
