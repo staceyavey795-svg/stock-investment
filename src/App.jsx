@@ -108,6 +108,8 @@ function App() {
   const [walletBalance, setWalletBalance] = useState(initialState.walletBalance)
   const [isFunding, setIsFunding] = useState(false)
   const [fundingAmount, setFundingAmount] = useState('')
+  const [fundingStep, setFundingStep] = useState('amount')
+  const [paymentMethod, setPaymentMethod] = useState('')
   const [buyError, setBuyError] = useState({})
   const [selectedSymbol, setSelectedSymbol] = useState(null)
   const [chartMode, setChartMode] = useState('line')
@@ -235,14 +237,25 @@ function App() {
     setWalletBalance((currentBalance) => currentBalance + proceeds)
   }
 
-  const fundWallet = (event) => {
+  const choosePaymentMethod = (event) => {
     event.preventDefault()
+    if (Number(fundingAmount) <= 0) return
+    setFundingStep('method')
+  }
+
+  const fundWallet = () => {
     const amount = Number(fundingAmount)
-    if (amount <= 0) return
+    if (amount <= 0 || !paymentMethod) return
 
     setWalletBalance((currentBalance) => currentBalance + amount)
-    setFundingAmount('')
+    setFundingStep('success')
+  }
+
+  const closeFunding = () => {
     setIsFunding(false)
+    setFundingStep('amount')
+    setPaymentMethod('')
+    setFundingAmount('')
   }
 
   const handleAuthSuccess = async () => {
@@ -472,28 +485,79 @@ function App() {
             <p className="eyebrow">AVAILABLE FUNDS</p>
             <h2 id="wallet-heading">${walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h2>
           </div>
-          <button type="button" className="fund-button" onClick={() => setIsFunding((isOpen) => !isOpen)}>
+          <button
+            type="button"
+            className="fund-button"
+            onClick={() => (isFunding ? closeFunding() : setIsFunding(true))}
+          >
             {isFunding ? 'Close' : 'Fund Wallet'}
           </button>
           {isFunding && (
-            <form className="fund-form" onSubmit={fundWallet}>
-              <label htmlFor="funding-amount">Add money to wallet ($)</label>
-              <div className="fund-form-controls">
-                <input
-                  id="funding-amount"
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={fundingAmount}
-                  onChange={(event) => setFundingAmount(event.target.value)}
-                  autoFocus
-                />
-                <button type="submit" className="confirm-button" disabled={!fundingAmount || Number(fundingAmount) <= 0}>
-                  Add funds
-                </button>
-              </div>
-            </form>
+            <div className="fund-form">
+              {fundingStep === 'amount' && (
+                <form onSubmit={choosePaymentMethod}>
+                  <label htmlFor="funding-amount">Add money to wallet ($)</label>
+                  <div className="fund-form-controls">
+                    <input
+                      id="funding-amount"
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={fundingAmount}
+                      onChange={(event) => setFundingAmount(event.target.value)}
+                      autoFocus
+                    />
+                    <button type="submit" className="confirm-button" disabled={!fundingAmount || Number(fundingAmount) <= 0}>
+                      Add funds
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {fundingStep === 'method' && (
+                <form className="fund-payment-step" onSubmit={(event) => { event.preventDefault(); fundWallet() }}>
+                  <p className="fund-amount-summary">
+                    Amount being added <strong>${Number(fundingAmount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                  </p>
+                  <fieldset className="fund-payment-options">
+                    <legend>Choose payment method</legend>
+                    {['PayPal', 'Credit/Debit Card', 'Bank Transfer', 'Crypto (USDT)'].map((method) => (
+                      <label key={method} className={paymentMethod === method ? 'selected' : ''}>
+                        <input
+                          type="radio"
+                          name="payment-method"
+                          value={method}
+                          checked={paymentMethod === method}
+                          onChange={() => setPaymentMethod(method)}
+                        />
+                        <span>{method}</span>
+                      </label>
+                    ))}
+                  </fieldset>
+                  <div className="fund-step-actions">
+                    <button
+                      type="button"
+                      className="fund-back-button"
+                      onClick={() => { setFundingStep('amount'); setPaymentMethod('') }}
+                    >
+                      Back
+                    </button>
+                    <button type="submit" className="confirm-button" disabled={!paymentMethod}>
+                      Continue
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {fundingStep === 'success' && (
+                <div className="fund-success" role="status">
+                  <p><strong>Funds added successfully.</strong></p>
+                  <p>${Number(fundingAmount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} added using {paymentMethod}.</p>
+                  <button type="button" className="confirm-button" onClick={closeFunding}>Done</button>
+                </div>
+              )}
+            </div>
           )}
         </section>
       )}

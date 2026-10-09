@@ -59,10 +59,25 @@ h2 { font-size: 28px; }
 .fund-button { padding: 10px 15px; border: 1px solid var(--ink); border-radius: 5px; color: var(--ink); background: transparent; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
 .fund-button:hover { color: var(--surface); background: var(--ink); }
 .fund-form { display: grid; grid-column: 1 / -1; gap: 10px; padding-top: 16px; border-top: 1px solid var(--border); }
+.fund-form form { display: grid; gap: 10px; }
 .fund-form label { color: var(--ink); font-size: 13px; font-weight: 700; }
 .fund-form-controls { display: flex; gap: 8px; }
-.fund-form input { min-width: 0; width: 150px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 5px; color: var(--ink); background: var(--bg); font: inherit; font-size: 13px; }
-.fund-form input:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.fund-form-controls input { min-width: 0; width: 150px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 5px; color: var(--ink); background: var(--bg); font: inherit; font-size: 13px; }
+.fund-form-controls input:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.fund-amount-summary, .fund-success p { margin: 0; color: var(--muted); font-size: 13px; }
+.fund-amount-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.fund-amount-summary strong, .fund-success p strong { color: var(--ink); }
+.fund-payment-options { display: grid; gap: 7px; margin: 0; padding: 0; border: 0; }
+.fund-payment-options legend { margin-bottom: 8px; color: var(--ink); font-size: 13px; font-weight: 700; }
+.fund-payment-options label { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); cursor: pointer; }
+.fund-payment-options label.selected { border-color: var(--green); background: var(--green-soft); }
+.fund-payment-options input { width: 16px; height: 16px; flex: 0 0 16px; margin: 0; accent-color: var(--green); }
+.fund-step-actions { display: flex; justify-content: space-between; gap: 10px; }
+.fund-back-button { padding: 9px 13px; border: 1px solid var(--border); border-radius: 5px; color: var(--ink); background: transparent; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
+.fund-back-button:hover { border-color: var(--ink); background: var(--surface); }
+.fund-back-button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.fund-success { display: grid; gap: 10px; }
+.fund-success .confirm-button { justify-self: end; }
 .watchlist-section, .stocks-section { padding-top: 42px; }
 .stocks-section { padding-top: 56px; }
 .portfolio-section { padding-top: 42px; }
