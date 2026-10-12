@@ -889,6 +889,7 @@ function App() {
   const [authView, setAuthView] = useState(() => getInitialAuthUrlState().hasError ? 'expired' : 'login')
   const [activeTab, setActiveTab] = useState('home')
   const [settingsReturnView, setSettingsReturnView] = useState({ tab: 'home', selectedSymbol: null })
+  const [aboutReturnView, setAboutReturnView] = useState({ tab: 'home', selectedSymbol: null })
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [watchlist, setWatchlist] = useState(initialState.watchlist)
   const [buyingSymbol, setBuyingSymbol] = useState(null)
@@ -1591,6 +1592,18 @@ function App() {
           >
             Log Out
           </button>
+          <button
+            type="button"
+            tabIndex={isMenuOpen ? 0 : -1}
+            onClick={() => {
+              if (activeTab !== 'about') setAboutReturnView({ tab: activeTab, selectedSymbol })
+              setActiveTab('about')
+              setSelectedSymbol(null)
+              setIsMenuOpen(false)
+            }}
+          >
+            About
+          </button>
         </nav>
       </aside>
 
@@ -1606,7 +1619,7 @@ function App() {
 
       {authError && <p className="auth-error" role="alert">{authError}</p>}
 
-      {activeTab !== 'settings' && <nav className="tab-nav" aria-label="Primary navigation">
+      {activeTab !== 'settings' && activeTab !== 'about' && <nav className="tab-nav" aria-label="Primary navigation">
         {[
           ['home', 'Home'],
           ['watchlist', 'Watchlist'],
@@ -2096,6 +2109,52 @@ function App() {
         </section>
       ) : (
         <>
+      {activeTab === 'about' && (
+        <section className="about-page" aria-labelledby="about-heading">
+          <button
+            type="button"
+            className="back-button about-back-button"
+            onClick={() => {
+              setActiveTab(aboutReturnView.tab)
+              setSelectedSymbol(aboutReturnView.selectedSymbol)
+            }}
+          >
+            Back
+          </button>
+          <div className="about-content">
+            <h2 id="about-heading">About Us</h2>
+            <div className="about-introduction">
+              <p>Welcome to our investment platform, where we believe in building financial opportunities through informed decisions, transparency, and responsible investing.</p>
+              <p>Our mission is to provide individuals with access to investment opportunities while helping them understand the importance of financial planning, risk management, and long-term growth.</p>
+              <p>We are committed to creating a professional and user-friendly platform where users can explore available investment options, monitor their investments, and access important information to make informed financial decisions.</p>
+            </div>
+            <section className="about-copy-section" aria-labelledby="about-mission-heading">
+              <h3 id="about-mission-heading">Our Mission</h3>
+              <p>Our mission is to make investment opportunities more accessible by providing a platform focused on transparency, reliability, and responsible financial growth.</p>
+            </section>
+            <section className="about-copy-section" aria-labelledby="about-vision-heading">
+              <h3 id="about-vision-heading">Our Vision</h3>
+              <p>We aim to build a trusted investment community where individuals can pursue their financial goals with confidence, knowledge, and a clear understanding of investment risks.</p>
+            </section>
+            <section className="about-copy-section" aria-labelledby="about-values-heading">
+              <h3 id="about-values-heading">Our Core Values</h3>
+              <ul>
+                <li><strong>Transparency:</strong> We believe in clear communication and honest information.</li>
+                <li><strong>Security:</strong> We value the protection of users' personal information and account data.</li>
+                <li><strong>Responsibility:</strong> We encourage informed investment decisions and responsible risk management.</li>
+                <li><strong>Innovation:</strong> We strive to provide a convenient and user-friendly investment experience.</li>
+                <li><strong>Customer Support:</strong> We aim to provide helpful assistance and clear information to our users.</li>
+              </ul>
+            </section>
+            <section className="about-copy-section" aria-labelledby="about-commitment-heading">
+              <h3 id="about-commitment-heading">Our Commitment</h3>
+              <p>We are dedicated to providing a professional investment experience built on trust, accountability, and continuous improvement. We encourage every user to understand the terms, potential returns, and risks associated with any investment before committing funds.</p>
+            </section>
+            <p className="about-closing">Your financial future deserves careful planning, informed decisions, and responsible investing.</p>
+          </div>
+        </section>
+      )}
+
       {activeTab === 'settings' && (
         <SettingsPage
           user={user}
