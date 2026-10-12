@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import './App.css'
 import Avatar from './Avatar.jsx'
-import Auth from './Auth.jsx'
 import CandlestickChart from './CandlestickChart.jsx'
 import Portfolio from './Portfolio.jsx'
 import Profile from './Profile.jsx'
@@ -26,6 +25,302 @@ const stocks = [
 ]
 
 const STORAGE_KEY = 'stock-investment-state'
+
+function getInitialAuthUrlState() {
+  const query = new URLSearchParams(window.location.search)
+  const hash = new URLSearchParams(window.location.hash.slice(1))
+  const hasError = Boolean(
+    query.get('error') || query.get('error_description') || query.get('error_code')
+    || hash.get('error') || hash.get('error_description') || hash.get('error_code'),
+  )
+
+  return {
+    isRecoveryMode: query.get('reset') === 'true' || hash.get('type') === 'recovery' || hasError,
+    hasError,
+  }
+}
+
+function PasswordVisibilityButton({ visible, onToggle, disabled }) {
+  return (
+    <button
+      type="button"
+      className="auth-password-toggle"
+      aria-label={visible ? 'Hide password' : 'Show password'}
+      aria-pressed={visible}
+      onClick={onToggle}
+      disabled={disabled}
+    >
+      {visible ? (
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M3 3l18 18M10.6 10.6a2 2 0 002.8 2.8" />
+          <path d="M9.9 5.2A10.8 10.8 0 0112 5c5.2 0 8.5 4.5 9.5 7-.4 1-1.3 2.3-2.6 3.5M6.2 6.2C3.9 7.7 2.8 9.8 2.5 12c1 2.5 4.3 7 9.5 7 1.1 0 2.1-.2 3-.5" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M2.5 12S5.8 5 12 5s9.5 7 9.5 7-3.3 7-9.5 7-9.5-7-9.5-7z" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+      )}
+    </button>
+  )
+}
+
+function AuthScreens({ authView, setAuthView, setIsRecoveryMode, onLogin, onRecoveryComplete, serverError, onClearError }) {
+  const [mode, setMode] = useState('login')
+  const [fullName, setFullName] = useState('')
+  const [username, setUsername] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false)
+  const [isConfirmPasswordVisible, setIsConfirmPasswordVisible] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
+  const [resetSent, setResetSent] = useState(false)
+
+  const isSignUp = mode === 'signup'
+
+  const changeMode = (nextMode) => {
+    setMode(nextMode)
+    setErrorMessage('')
+    onClearError()
+  }
+
+  const submitAuth = async (event) => {
+    event.preventDefault()
+    setIsLoading(true)
+    setErrorMessage('')
+    onClearError()
+
+    try {
+      const { data, error } = isSignUp
+        ? await supabase.auth.signUp({ email, password })
+        : await supabase.auth.signInWithPassword({ email, password })
+
+      if (error) {
+        setErrorMessage(error.message)
+        return
+      }
+
+      if (isSignUp) {
+        if (!data.user) throw new Error('Your account was created, but its profile could not be saved.')
+
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .insert({ id: data.user.id, full_name: fullName, username })
+
+        if (profileError) throw profileError
+      }
+
+      onLogin(data.user)
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Authentication failed.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const sendResetLink = async (event) => {
+    event.preventDefault()
+    setIsLoading(true)
+    setErrorMessage('')
+    setResetSent(false)
+    onClearError()
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin + '/?reset=true',
+      })
+      if (error) throw error
+      setResetSent(true)
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Could not send the reset link. Please try again.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const updatePassword = async (event) => {
+    event.preventDefault()
+    setErrorMessage('')
+
+    if (password.length < 8) {
+      setErrorMessage('Your password must be at least 8 characters long.')
+      return
+    }
+    if (password !== confirmPassword) {
+      setErrorMessage('The passwords do not match.')
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      const { error } = await supabase.auth.updateUser({ password })
+      if (error) {
+        if (/password.*(weak|short|characters|length)|weak.*password/i.test(error.message)) {
+          throw new Error('Your password is too weak. Choose a password with at least 8 characters.')
+        }
+        if (/expired|invalid|token|session/i.test(error.message)) {
+          throw new Error('This password reset link has expired or is invalid. Request a new link and try again.')
+        }
+        throw error
+      }
+      onRecoveryComplete()
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Could not update your password. Please try again.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const returnToLogin = () => {
+    setIsRecoveryMode(false)
+    setAuthView('login')
+    setErrorMessage('')
+    setResetSent(false)
+    onClearError()
+  }
+
+  const error = errorMessage || serverError
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel" aria-labelledby="auth-heading">
+        <p className="eyebrow">STOCK INVESTMENT</p>
+
+        {authView === 'reset' && (
+          <>
+            <h2 id="auth-heading">Reset your password</h2>
+            <form className="auth-form" onSubmit={sendResetLink}>
+              <label htmlFor="auth-reset-email">Email</label>
+              <input
+                id="auth-reset-email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => { setEmail(event.target.value); setResetSent(false) }}
+                required
+                disabled={isLoading}
+              />
+              {error && <p className="auth-error" role="alert">{error}</p>}
+              {resetSent && <p className="auth-success" role="status">If an account exists for that email, a reset link has been sent</p>}
+              <button type="submit" className="confirm-button auth-submit" disabled={isLoading || !email}>
+                {isLoading ? 'Sending...' : 'Send reset link'}
+              </button>
+              <button type="button" className="auth-text-link" onClick={returnToLogin} disabled={isLoading}>Back to log in</button>
+            </form>
+          </>
+        )}
+
+        {authView === 'expired' && (
+          <div className="auth-result" role="alert">
+            <h2 id="auth-heading">Reset link expired</h2>
+            <p className="auth-error">This reset link has expired. Please request a new one.</p>
+            <button
+              type="button"
+              className="auth-text-link"
+              onClick={() => {
+                setIsRecoveryMode(false)
+                setAuthView('reset')
+                setErrorMessage('')
+                onClearError()
+              }}
+            >
+              Back to forgot password
+            </button>
+          </div>
+        )}
+
+        {authView === 'recovery' && (
+          <>
+            <h2 id="auth-heading">Set a new password</h2>
+            <form className="auth-form" onSubmit={updatePassword}>
+              <label htmlFor="auth-new-password">New password</label>
+              <div className="auth-password-field">
+                <input
+                  id="auth-new-password"
+                  type={isPasswordVisible ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  minLength={8}
+                  required
+                  disabled={isLoading}
+                />
+                <PasswordVisibilityButton visible={isPasswordVisible} onToggle={() => setIsPasswordVisible((visible) => !visible)} disabled={isLoading} />
+              </div>
+              <label htmlFor="auth-confirm-password">Confirm password</label>
+              <div className="auth-password-field">
+                <input
+                  id="auth-confirm-password"
+                  type={isConfirmPasswordVisible ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  minLength={8}
+                  required
+                  disabled={isLoading}
+                />
+                <PasswordVisibilityButton visible={isConfirmPasswordVisible} onToggle={() => setIsConfirmPasswordVisible((visible) => !visible)} disabled={isLoading} />
+              </div>
+              {error && <p className="auth-error" role="alert">{error}</p>}
+              <button type="submit" className="confirm-button auth-submit" disabled={isLoading || password.length < 8 || confirmPassword.length < 8 || password !== confirmPassword}>
+                {isLoading ? 'Updating...' : 'Update password'}
+              </button>
+            </form>
+          </>
+        )}
+
+        {authView === 'updated' && (
+          <div className="auth-result" role="status">
+            <h2 id="auth-heading">Password updated</h2>
+            <p>Your password has been updated successfully.</p>
+          </div>
+        )}
+
+        {(authView === 'login' || authView === 'signup') && (
+          <>
+            <h2 id="auth-heading">{isSignUp ? 'Create your account' : 'Welcome back'}</h2>
+            <div className="auth-mode-toggle" aria-label="Authentication mode">
+              <button type="button" className={isSignUp ? 'auth-mode-button' : 'auth-mode-button active'} aria-pressed={!isSignUp} onClick={() => changeMode('login')} disabled={isLoading}>Log In</button>
+              <button type="button" className={isSignUp ? 'auth-mode-button active' : 'auth-mode-button'} aria-pressed={isSignUp} onClick={() => changeMode('signup')} disabled={isLoading}>Sign Up</button>
+            </div>
+            <form className="auth-form" onSubmit={submitAuth}>
+              {isSignUp && (
+                <>
+                  <label htmlFor="auth-full-name">Full Name</label>
+                  <input id="auth-full-name" type="text" autoComplete="name" value={fullName} onChange={(event) => setFullName(event.target.value)} required disabled={isLoading} />
+                  <label htmlFor="auth-username">Username</label>
+                  <input id="auth-username" type="text" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required disabled={isLoading} />
+                </>
+              )}
+              <label htmlFor="auth-email">Email</label>
+              <input id="auth-email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required disabled={isLoading} />
+              <label htmlFor="auth-password">Password</label>
+              <div className="auth-password-field">
+                <input
+                  id="auth-password"
+                  type={isPasswordVisible ? 'text' : 'password'}
+                  autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                  disabled={isLoading}
+                />
+                <PasswordVisibilityButton visible={isPasswordVisible} onToggle={() => setIsPasswordVisible((visible) => !visible)} disabled={isLoading} />
+              </div>
+              {!isSignUp && <button type="button" className="auth-text-link auth-forgot-link" onClick={() => { setAuthView('reset'); setErrorMessage(''); onClearError() }}>Forgot password?</button>}
+              {error && <p className="auth-error" role="alert">{error}</p>}
+              <button type="submit" className="confirm-button auth-submit" disabled={isLoading || !email || !password || (isSignUp && (!fullName || !username))}>
+                {isLoading ? (isSignUp ? 'Creating account...' : 'Logging in...') : (isSignUp ? 'Create account' : 'Log In')}
+              </button>
+            </form>
+          </>
+        )}
+      </section>
+    </main>
+  )
+}
 
 async function hashUserPin(pin, userId) {
   const pinBytes = new TextEncoder().encode(`${userId}:${pin}`)
@@ -103,6 +398,8 @@ function App() {
   const [avatarRefreshKey, setAvatarRefreshKey] = useState(0)
   const [isCheckingSession, setIsCheckingSession] = useState(true)
   const [authError, setAuthError] = useState('')
+  const [isRecoveryMode, setIsRecoveryMode] = useState(() => getInitialAuthUrlState().isRecoveryMode)
+  const [authView, setAuthView] = useState(() => getInitialAuthUrlState().hasError ? 'expired' : 'login')
   const [activeTab, setActiveTab] = useState('home')
   const [settingsReturnView, setSettingsReturnView] = useState({ tab: 'home', selectedSymbol: null })
   const [isMenuOpen, setIsMenuOpen] = useState(false)
@@ -130,8 +427,13 @@ function App() {
 
   useEffect(() => {
     let isMounted = true
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!isMounted) return
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRecoveryMode(true)
+        setAuthView('recovery')
+      }
+      if (event === 'SIGNED_OUT') setAuthView('login')
       setUser(session?.user ?? null)
       setIsCheckingSession(false)
       setAuthError('')
@@ -155,6 +457,13 @@ function App() {
       subscription.unsubscribe()
     }
   }, [])
+
+  useEffect(() => {
+    if (authView !== 'updated') return undefined
+
+    const timeoutId = window.setTimeout(() => setAuthView('login'), 1400)
+    return () => window.clearTimeout(timeoutId)
+  }, [authView])
 
   useEffect(() => {
     try {
@@ -388,6 +697,16 @@ function App() {
     setUser(data.session?.user ?? null)
   }
 
+  const completePasswordRecovery = () => {
+    setIsRecoveryMode(false)
+    const url = new URL(window.location.href)
+    url.searchParams.delete('reset')
+    url.hash = ''
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
+    setAuthView('updated')
+    setAuthError('')
+  }
+
   const logOut = async () => {
     setAuthError('')
     const { error } = await supabase.auth.signOut()
@@ -484,12 +803,21 @@ function App() {
     )
   }
 
+  if (isRecoveryMode) {
+    const recoveryView = authView === 'expired' ? 'expired' : 'recovery'
+    return <AuthScreens authView={recoveryView} setAuthView={setAuthView} setIsRecoveryMode={setIsRecoveryMode} onLogin={handleAuthSuccess} onRecoveryComplete={completePasswordRecovery} serverError={authError} onClearError={() => setAuthError('')} />
+  }
+
   if (isCheckingSession) {
     return <main className="auth-loading" aria-live="polite">Checking your session...</main>
   }
 
+  if (authView === 'updated' || authView === 'reset') {
+    return <AuthScreens authView={authView} setAuthView={setAuthView} setIsRecoveryMode={setIsRecoveryMode} onLogin={handleAuthSuccess} onRecoveryComplete={completePasswordRecovery} serverError={authError} onClearError={() => setAuthError('')} />
+  }
+
   if (!user) {
-    return <Auth onLogin={handleAuthSuccess} />
+    return <AuthScreens authView={authView} setAuthView={setAuthView} setIsRecoveryMode={setIsRecoveryMode} onLogin={handleAuthSuccess} onRecoveryComplete={completePasswordRecovery} serverError={authError} onClearError={() => setAuthError('')} />
   }
 
   return (
