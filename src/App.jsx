@@ -1521,7 +1521,9 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={activeTab === 'about' ? 'app-shell about-app-shell' : 'app-shell'}>
+      {activeTab !== 'about' && (
+        <>
       <button
         type="button"
         className={isMenuOpen ? 'menu-toggle is-open' : 'menu-toggle'}
@@ -1616,8 +1618,10 @@ function App() {
           <span className="market-status"><i /> Market open</span>
         </div>
       </header>
+        </>
+      )}
 
-      {authError && <p className="auth-error" role="alert">{authError}</p>}
+      {activeTab !== 'about' && authError && <p className="auth-error" role="alert">{authError}</p>}
 
       {activeTab !== 'settings' && activeTab !== 'about' && <nav className="tab-nav" aria-label="Primary navigation">
         {[
