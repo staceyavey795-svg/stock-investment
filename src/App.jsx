@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import './App.css'
 import Avatar from './Avatar.jsx'
@@ -409,10 +409,18 @@ function App() {
   const [confirmedOrders, setConfirmedOrders] = useState({})
   const [portfolio, setPortfolio] = useState(initialState.portfolio)
   const [walletBalance, setWalletBalance] = useState(initialState.walletBalance)
+  const walletBalanceRef = useRef(initialState.walletBalance)
   const [isFunding, setIsFunding] = useState(false)
   const [fundingAmount, setFundingAmount] = useState('')
   const [fundingStep, setFundingStep] = useState('amount')
   const [paymentMethod, setPaymentMethod] = useState('')
+  const [isWithdrawing, setIsWithdrawing] = useState(false)
+  const [withdrawalAmount, setWithdrawalAmount] = useState('')
+  const [withdrawalStep, setWithdrawalStep] = useState('amount')
+  const [withdrawalMethod, setWithdrawalMethod] = useState('')
+  const [withdrawalError, setWithdrawalError] = useState('')
+  const [isProcessingWithdrawal, setIsProcessingWithdrawal] = useState(false)
+  const [withdrawalHistoryState, setWithdrawalHistoryState] = useState({ userId: null, items: [], isLoading: true, error: '' })
   const [savedPinHash, setSavedPinHash] = useState('')
   const [pin, setPin] = useState('')
   const [pinConfirmation, setPinConfirmation] = useState('')
@@ -424,6 +432,17 @@ function App() {
   const [buyError, setBuyError] = useState({})
   const [selectedSymbol, setSelectedSymbol] = useState(null)
   const [chartMode, setChartMode] = useState('line')
+
+  const withdrawalHistory = withdrawalHistoryState.userId === user?.id ? withdrawalHistoryState.items : []
+  const isLoadingWithdrawals = Boolean(user?.id) && (
+    withdrawalHistoryState.userId !== user.id || withdrawalHistoryState.isLoading
+  )
+  const withdrawalHistoryError = withdrawalHistoryState.userId === user?.id ? withdrawalHistoryState.error : ''
+
+  const updateWalletBalance = (nextBalance) => {
+    walletBalanceRef.current = nextBalance
+    setWalletBalance(nextBalance)
+  }
 
   useEffect(() => {
     let isMounted = true
@@ -472,6 +491,42 @@ function App() {
       // Storage can be unavailable or full; the app remains usable for this session.
     }
   }, [walletBalance, portfolio, watchlist])
+
+  useEffect(() => {
+    if (!user?.id) return undefined
+
+    let isCurrent = true
+    const userId = user.id
+    supabase
+      .from('withdrawals')
+      .select('id, amount, method, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(10)
+      .then(({ data, error }) => {
+        if (!isCurrent) return
+        if (error) throw error
+        setWithdrawalHistoryState((currentState) => {
+          const existingItems = currentState.userId === userId ? currentState.items : []
+          const mergedItems = [...existingItems, ...(data ?? [])]
+          const uniqueItems = [...new Map(mergedItems.map((item) => [item.id, item])).values()]
+            .sort((first, second) => new Date(second.created_at) - new Date(first.created_at))
+
+          return { userId, items: uniqueItems.slice(0, 10), isLoading: false, error: '' }
+        })
+      })
+      .catch((error) => {
+        if (!isCurrent) return
+        setWithdrawalHistoryState((currentState) => ({
+          userId,
+          items: currentState.userId === userId ? currentState.items : [],
+          isLoading: false,
+          error: error instanceof Error ? error.message : 'Could not load withdrawal history.',
+        }))
+      })
+
+    return () => { isCurrent = false }
+  }, [user?.id])
 
   useEffect(() => {
     if (!pinLockUntil) return undefined
@@ -530,7 +585,7 @@ function App() {
     const amount = Number(investmentAmounts[stock.symbol])
     const currentPrice = Number(stock.price.replace('$', ''))
     if (amount <= 0) return
-    if (amount > walletBalance) {
+    if (amount > walletBalanceRef.current) {
       setBuyError((currentErrors) => ({ ...currentErrors, [stock.symbol]: 'Insufficient wallet balance.' }))
       return
     }
@@ -553,7 +608,7 @@ function App() {
         },
       }
     })
-    setWalletBalance((currentBalance) => currentBalance - amount)
+    updateWalletBalance(walletBalanceRef.current - amount)
     setConfirmedOrders((currentOrders) => ({ ...currentOrders, [stock.symbol]: true }))
   }
 
@@ -575,13 +630,25 @@ function App() {
         [symbol]: { ...holding, quantity: remainingQuantity },
       }
     })
-    setWalletBalance((currentBalance) => currentBalance + proceeds)
+    updateWalletBalance(walletBalanceRef.current + proceeds)
   }
 
   const choosePaymentMethod = (event) => {
     event.preventDefault()
     if (Number(fundingAmount) <= 0) return
     setFundingStep('method')
+  }
+
+  const chooseWithdrawalMethod = (event) => {
+    event.preventDefault()
+    const amount = Number(withdrawalAmount)
+    if (!withdrawalAmount || !Number.isFinite(amount) || amount <= 0) return
+    if (amount > walletBalanceRef.current) {
+      setWithdrawalError('Amount exceeds your available balance.')
+      return
+    }
+    setWithdrawalError('')
+    setWithdrawalStep('method')
   }
 
   const checkFundingPin = async (event) => {
@@ -614,8 +681,141 @@ function App() {
     const amount = Number(fundingAmount)
     if (amount <= 0 || !paymentMethod) return
 
-    setWalletBalance((currentBalance) => currentBalance + amount)
+    updateWalletBalance(walletBalanceRef.current + amount)
     setFundingStep('success')
+  }
+
+  const checkWithdrawalPin = async (event) => {
+    event.preventDefault()
+    if (!user?.id || !withdrawalMethod) return
+
+    setWithdrawalStep('pin-checking')
+    setPinError('')
+    setWithdrawalError('')
+
+    try {
+      const { data, error } = await supabase
+        .from('user_pins')
+        .select('pin_hash')
+        .eq('user_id', user.id)
+        .maybeSingle()
+
+      if (error) throw error
+
+      setSavedPinHash(data?.pin_hash ?? '')
+      setPin('')
+      setPinConfirmation('')
+      setWithdrawalStep(data?.pin_hash ? 'pin-enter' : 'pin-create')
+    } catch (error) {
+      setPinError(error instanceof Error ? error.message : 'Could not check your PIN.')
+      setWithdrawalStep('method')
+    }
+  }
+
+  const withdrawWalletFunds = async () => {
+    const amount = Number(withdrawalAmount)
+    if (!user?.id || !withdrawalMethod || !Number.isFinite(amount) || amount <= 0) return false
+
+    const currentBalance = walletBalanceRef.current
+    if (amount > currentBalance) {
+      setPinError('Amount exceeds your available balance.')
+      return false
+    }
+
+    updateWalletBalance(currentBalance - amount)
+    try {
+      const { error } = await supabase.from('withdrawals').insert({
+        user_id: user.id,
+        amount,
+        method: withdrawalMethod,
+      })
+      if (error) throw error
+
+      const newWithdrawal = {
+        id: `local-${Date.now()}`,
+        amount,
+        method: withdrawalMethod,
+        created_at: new Date().toISOString(),
+      }
+      setWithdrawalHistoryState((currentState) => ({
+        userId: user.id,
+        items: [newWithdrawal, ...(currentState.userId === user.id ? currentState.items : [])].slice(0, 10),
+        isLoading: false,
+        error: '',
+      }))
+      setWithdrawalStep('success')
+      setPinError('')
+      return true
+    } catch (error) {
+      updateWalletBalance(walletBalanceRef.current + amount)
+      setPinError(error instanceof Error ? error.message : 'Could not record this withdrawal. Please try again.')
+      return false
+    }
+  }
+
+  const createWithdrawalPin = async (event) => {
+    event.preventDefault()
+    if (!/^\d{4}$/.test(pin) || pin !== pinConfirmation || !user?.id || isSavingPin) return
+
+    setIsSavingPin(true)
+    setPinError('')
+    setIsProcessingWithdrawal(true)
+
+    try {
+      const pinHash = await hashUserPin(pin, user.id)
+      const { error } = await supabase
+        .from('user_pins')
+        .insert({ user_id: user.id, pin_hash: pinHash })
+
+      if (error) throw error
+
+      setSavedPinHash(pinHash)
+      await withdrawWalletFunds()
+    } catch (error) {
+      setPinError(error instanceof Error ? error.message : 'Could not save your PIN.')
+    } finally {
+      setIsSavingPin(false)
+      setIsProcessingWithdrawal(false)
+    }
+  }
+
+  const verifyWithdrawalPin = async (event) => {
+    event.preventDefault()
+    if (!/^\d{4}$/.test(pin) || pinLockRemaining > 0 || isProcessingWithdrawal) return
+
+    setIsProcessingWithdrawal(true)
+    setPinError('')
+    try {
+      const enteredPinHash = await hashUserPin(pin, user.id)
+      if (enteredPinHash === savedPinHash) {
+        const succeeded = await withdrawWalletFunds()
+        if (succeeded) {
+          setWrongPinAttempts(0)
+          setPin('')
+        }
+        return
+      }
+
+      const attempts = wrongPinAttempts + 1
+      setWrongPinAttempts(attempts)
+      setPin('')
+      setPinError('Incorrect PIN')
+      if (attempts >= 3) {
+        setPinLockUntil(Date.now() + 60000)
+        setPinLockRemaining(60)
+      }
+    } catch {
+      setPinError('Could not verify your PIN. Please try again.')
+    } finally {
+      setIsProcessingWithdrawal(false)
+    }
+  }
+
+  const returnToWithdrawalMethod = () => {
+    setPin('')
+    setPinConfirmation('')
+    setPinError('')
+    setWithdrawalStep('method')
   }
 
   const createFundingPin = async (event) => {
@@ -682,6 +882,18 @@ function App() {
     setFundingStep('amount')
     setPaymentMethod('')
     setFundingAmount('')
+    setSavedPinHash('')
+    setPin('')
+    setPinConfirmation('')
+    setPinError('')
+  }
+
+  const closeWithdrawal = () => {
+    setIsWithdrawing(false)
+    setWithdrawalStep('amount')
+    setWithdrawalAmount('')
+    setWithdrawalMethod('')
+    setWithdrawalError('')
     setSavedPinHash('')
     setPin('')
     setPinConfirmation('')
@@ -934,13 +1146,34 @@ function App() {
             <p className="eyebrow">AVAILABLE FUNDS</p>
             <h2 id="wallet-heading">${walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h2>
           </div>
-          <button
-            type="button"
-            className="fund-button"
-            onClick={() => (isFunding ? closeFunding() : setIsFunding(true))}
-          >
-            {isFunding ? 'Close' : 'Fund Wallet'}
-          </button>
+          <div className="wallet-actions">
+            <button
+              type="button"
+              className="fund-button"
+              onClick={() => {
+                if (isFunding) closeFunding()
+                else {
+                  if (isWithdrawing) closeWithdrawal()
+                  setIsFunding(true)
+                }
+              }}
+            >
+              {isFunding ? 'Close' : 'Add funds'}
+            </button>
+            <button
+              type="button"
+              className="fund-button"
+              onClick={() => {
+                if (isWithdrawing) closeWithdrawal()
+                else {
+                  if (isFunding) closeFunding()
+                  setIsWithdrawing(true)
+                }
+              }}
+            >
+              {isWithdrawing ? 'Close' : 'Withdraw'}
+            </button>
+          </div>
           {isFunding && (
             <div className="fund-form">
               {fundingStep === 'amount' && (
@@ -1087,6 +1320,194 @@ function App() {
                 </div>
               )}
             </div>
+          )}
+          {isWithdrawing && (
+            <div className="fund-form withdrawal-form">
+              {withdrawalStep === 'amount' && (
+                <form onSubmit={chooseWithdrawalMethod}>
+                  <p className="fund-amount-summary">
+                    Available balance <strong>${walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                  </p>
+                  <label htmlFor="withdrawal-amount">Amount to withdraw ($)</label>
+                  <div className="fund-form-controls">
+                    <input
+                      id="withdrawal-amount"
+                      type="text"
+                      inputMode="decimal"
+                      pattern="(?:\d+(?:\.\d{0,2})?|\.\d{1,2})?"
+                      placeholder="0.00"
+                      value={withdrawalAmount}
+                      onChange={(event) => {
+                        const value = event.target.value
+                        if (/^\d*\.?\d{0,2}$/.test(value)) {
+                          setWithdrawalAmount(value)
+                          setWithdrawalError('')
+                        }
+                      }}
+                      autoFocus
+                    />
+                    <button
+                      type="submit"
+                      className="confirm-button"
+                      disabled={!withdrawalAmount || !Number.isFinite(Number(withdrawalAmount)) || Number(withdrawalAmount) <= 0 || Number(withdrawalAmount) > walletBalance}
+                    >
+                      Continue
+                    </button>
+                  </div>
+                  {(withdrawalError || (Number(withdrawalAmount) > walletBalance && withdrawalAmount)) && (
+                    <p className="fund-pin-error" role="alert">{withdrawalError || 'Amount exceeds your available balance.'}</p>
+                  )}
+                </form>
+              )}
+
+              {withdrawalStep === 'method' && (
+                <form className="fund-payment-step" onSubmit={checkWithdrawalPin}>
+                  <p className="fund-amount-summary">
+                    Amount being withdrawn <strong>${Number(withdrawalAmount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                  </p>
+                  <fieldset className="fund-payment-options">
+                    <legend>Choose withdrawal method</legend>
+                    {['Bank Transfer', 'PayPal', 'Crypto (USDT)'].map((method) => (
+                      <label key={method} className={withdrawalMethod === method ? 'selected' : ''}>
+                        <input
+                          type="radio"
+                          name="withdrawal-method"
+                          value={method}
+                          checked={withdrawalMethod === method}
+                          onChange={() => setWithdrawalMethod(method)}
+                        />
+                        <span>{method}</span>
+                      </label>
+                    ))}
+                  </fieldset>
+                  <div className="fund-step-actions">
+                    <button
+                      type="button"
+                      className="fund-back-button"
+                      onClick={() => { setWithdrawalStep('amount'); setWithdrawalMethod(''); setPinError('') }}
+                    >
+                      Back
+                    </button>
+                    <button type="submit" className="confirm-button" disabled={!withdrawalMethod}>
+                      Continue
+                    </button>
+                  </div>
+                  {pinError && <p className="fund-pin-error" role="alert">{pinError}</p>}
+                </form>
+              )}
+
+              {withdrawalStep === 'pin-checking' && (
+                <p className="fund-pin-status" role="status">Checking your PIN setup...</p>
+              )}
+
+              {withdrawalStep === 'pin-create' && (
+                <form className="fund-pin-step" onSubmit={createWithdrawalPin}>
+                  <p className="fund-pin-title">Create your PIN</p>
+                  <label htmlFor="withdrawal-pin">Enter a 4-digit PIN</label>
+                  <input
+                    id="withdrawal-pin"
+                    className="fund-pin-input"
+                    type="password"
+                    inputMode="numeric"
+                    pattern="[0-9]{4}"
+                    maxLength={4}
+                    autoComplete="new-password"
+                    value={pin}
+                    onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                    required
+                    disabled={isSavingPin}
+                  />
+                  <label htmlFor="withdrawal-pin-confirm">Confirm your PIN</label>
+                  <input
+                    id="withdrawal-pin-confirm"
+                    className="fund-pin-input"
+                    type="password"
+                    inputMode="numeric"
+                    pattern="[0-9]{4}"
+                    maxLength={4}
+                    autoComplete="new-password"
+                    value={pinConfirmation}
+                    onChange={(event) => setPinConfirmation(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                    required
+                    disabled={isSavingPin}
+                  />
+                  {pinError && <p className="fund-pin-error" role="alert">{pinError}</p>}
+                  <div className="fund-pin-actions">
+                    <button type="button" className="fund-back-button" onClick={returnToWithdrawalMethod} disabled={isSavingPin}>Back</button>
+                    <button
+                      type="submit"
+                      className="confirm-button"
+                      disabled={isSavingPin || pin.length !== 4 || pinConfirmation.length !== 4 || pin !== pinConfirmation}
+                    >
+                      {isSavingPin ? 'Saving...' : 'Save PIN and withdraw'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {withdrawalStep === 'pin-enter' && (
+                <form className="fund-pin-step" onSubmit={verifyWithdrawalPin}>
+                  <p className="fund-pin-title">Enter your 4-digit secret PIN</p>
+                  <label htmlFor="withdrawal-pin">Enter your PIN</label>
+                  <input
+                    id="withdrawal-pin"
+                    className="fund-pin-input"
+                    type="password"
+                    inputMode="numeric"
+                    pattern="[0-9]{4}"
+                    maxLength={4}
+                    autoComplete="current-password"
+                    value={pin}
+                    onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                    required
+                    disabled={pinLockRemaining > 0 || isProcessingWithdrawal}
+                  />
+                  {pinError && <p className="fund-pin-error" role="alert">{pinError}</p>}
+                  {pinLockRemaining > 0 && (
+                    <p className="fund-pin-status" role="status">Try again in {pinLockRemaining} seconds.</p>
+                  )}
+                  <div className="fund-pin-actions">
+                    <button type="button" className="fund-back-button" onClick={returnToWithdrawalMethod} disabled={isProcessingWithdrawal}>Back</button>
+                    <button type="submit" className="confirm-button" disabled={pin.length !== 4 || pinLockRemaining > 0 || isProcessingWithdrawal}>
+                      {isProcessingWithdrawal ? 'Verifying...' : 'Verify PIN and withdraw'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {withdrawalStep === 'success' && (
+                <div className="fund-success" role="status">
+                  <p><strong>Withdrawal successful.</strong></p>
+                  <p>${Number(withdrawalAmount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} withdrawn using {withdrawalMethod}.</p>
+                  <button type="button" className="confirm-button" onClick={closeWithdrawal}>Done</button>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {activeTab === 'home' && (
+        <section className="withdrawal-history" aria-labelledby="withdrawal-history-heading">
+          <div className="withdrawal-history-heading">
+            <h2 id="withdrawal-history-heading">Withdrawal history</h2>
+          </div>
+          {isLoadingWithdrawals ? (
+            <p className="fund-pin-status" role="status">Loading withdrawal history...</p>
+          ) : withdrawalHistoryError ? (
+            <p className="fund-pin-error" role="alert">{withdrawalHistoryError}</p>
+          ) : withdrawalHistory.length === 0 ? (
+            <p className="withdrawal-empty-state">No withdrawals yet.</p>
+          ) : (
+            <ul className="withdrawal-list">
+              {withdrawalHistory.map((withdrawal) => (
+                <li key={withdrawal.id} className="withdrawal-history-row">
+                  <strong>${Number(withdrawal.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                  <span>{withdrawal.method}</span>
+                  <time dateTime={withdrawal.created_at}>{new Date(withdrawal.created_at).toLocaleString()}</time>
+                </li>
+              ))}
+            </ul>
           )}
         </section>
       )}
