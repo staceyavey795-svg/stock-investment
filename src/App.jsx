@@ -5,6 +5,7 @@ import Avatar from './Avatar.jsx'
 import CandlestickChart from './CandlestickChart.jsx'
 import Portfolio from './Portfolio.jsx'
 import Profile from './Profile.jsx'
+import logo from './assets/logo.webp'
 import { supabase } from './supabaseClient.js'
 
 const stocks = [
@@ -185,6 +186,9 @@ function AuthScreens({ authView, setAuthView, setIsRecoveryMode, onLogin, onReco
   return (
     <main className="auth-shell">
       <section className="auth-panel" aria-labelledby="auth-heading">
+        {(authView === 'login' || authView === 'signup') && (
+          <img className="auth-logo" src={logo} alt="GX Trading logo" />
+        )}
         <p className="eyebrow">STOCK INVESTMENT</p>
 
         {authView === 'reset' && (
@@ -1537,6 +1541,7 @@ function App() {
         <span />
       </button>
       <Avatar userId={user.id} refreshKey={avatarRefreshKey} className="app-user-avatar" />
+      <img className="app-header-logo" src={logo} alt="GX Trading logo" />
       <button
         type="button"
         className={isMenuOpen ? 'drawer-backdrop is-visible' : 'drawer-backdrop'}
