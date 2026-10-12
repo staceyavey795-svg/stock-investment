@@ -21,7 +21,16 @@
 .settings-section { padding-top: 42px; }
 .settings-section h2 { font-size: 24px; }
 .settings-back-button { margin-bottom: 20px; }
-.settings-form { display: grid; gap: 14px; margin-top: 20px; }
+.settings-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 16px; margin-top: 20px; }
+.settings-card { display: grid; min-width: 0; align-content: start; gap: 16px; padding: 22px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.settings-card > h3, .settings-card-heading h3 { margin: 0; color: var(--ink); font-size: 18px; }
+.settings-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.settings-account-detail { display: grid; gap: 6px; }
+.settings-account-detail > span, .settings-username-block h3, .settings-username-block h4 { margin: 0; color: var(--muted); font-size: 12px; font-weight: 700; }
+.settings-email-value { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+.settings-email-value p { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--ink); font-size: 14px; }
+.settings-verified { padding: 4px 8px; border-radius: 4px; color: var(--green); background: var(--green-soft); font-size: 11px; font-weight: 700; }
+.settings-username-block { display: grid; gap: 6px; }
 .settings-username-block h3 { margin: 0 0 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .settings-username-display, .settings-username-editor { display: flex; align-items: center; gap: 10px; }
 .settings-username-display p { margin: 0; color: var(--ink); font-size: 15px; }
@@ -35,6 +44,28 @@
 .settings-icon-button:hover:not(:disabled) { border-color: currentColor; background: var(--bg); }
 .settings-edit-button:focus-visible, .settings-icon-button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .settings-icon-button:disabled, .settings-edit-button:disabled { cursor: not-allowed; opacity: .5; }
+.settings-security-actions, .settings-security-form { display: grid; gap: 10px; }
+.settings-large-action { min-height: 46px; text-align: left; }
+.settings-forgot-pin { justify-self: start; min-height: 40px; }
+.settings-security-form label { color: var(--ink); font-size: 13px; font-weight: 700; }
+.settings-security-form input { width: 100%; min-width: 0; padding: 10px 11px; border: 1px solid var(--border); border-radius: 5px; color: var(--ink); background: var(--bg); font: inherit; font-size: 14px; }
+.settings-security-form input:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.settings-security-form input:disabled { opacity: .65; }
+.settings-security-form .settings-pin-input { max-width: 220px; font-size: 18px; text-align: center; }
+.settings-security-note { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.settings-form-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-top: 4px; }
+.settings-form-actions button, .settings-history-button { min-height: 44px; }
+.settings-history-card { grid-column: 1 / -1; }
+.settings-history-content { display: grid; gap: 10px; }
+.settings-transaction-list { display: grid; margin: 0; padding: 0; border-top: 1px solid var(--border); list-style: none; }
+.settings-transaction-list li { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 62px; padding: 10px 2px; border-bottom: 1px solid var(--border); }
+.settings-transaction-list li > div { display: grid; gap: 4px; min-width: 0; }
+.settings-transaction-list li strong { color: var(--ink); font-size: 13px; }
+.settings-transaction-list li span, .settings-transaction-value time { color: var(--muted); font-size: 12px; }
+.settings-transaction-value { justify-items: end; text-align: right; }
+.settings-logout-button { width: 100%; min-height: 48px; margin-top: 20px; border: 1px solid var(--red); border-radius: 5px; color: var(--red); background: transparent; cursor: pointer; font: inherit; font-size: 13px; font-weight: 700; }
+.settings-logout-button:hover { color: var(--surface); background: var(--red); }
+.settings-logout-button:focus-visible { outline: 2px solid var(--red); outline-offset: 3px; }
 .app-header, .section-heading, .stock-card { display: flex; align-items: center; justify-content: space-between; }
 .app-header { padding-bottom: 48px; border-bottom: 1px solid var(--border); }
 .eyebrow { margin: 0 0 8px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 1.8px; }
@@ -225,4 +256,5 @@ h2 { font-size: 28px; }
 .detail-buy-form { max-width: 560px; margin-top: 26px; padding: 20px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 .detail-buy-form > div:first-child { margin-bottom: 6px; }
 @media (max-width: 560px) { .detail-heading { align-items: flex-start; flex-direction: column; } .detail-price { justify-items: start; } .detail-chart { height: 270px; padding: 16px 10px 8px; } .detail-buy-form { padding: 16px; } }
+@media (max-width: 680px) { .settings-card-grid { grid-template-columns: 1fr; } .settings-card { padding: 18px; } .settings-history-card { grid-column: auto; } .settings-card-heading { align-items: flex-start; flex-direction: column; } .settings-history-button { width: 100%; } .settings-transaction-list li { align-items: flex-start; } }
 @media (max-width: 560px) { .app-shell { padding: 36px 18px 60px; } .app-header { align-items: flex-start; gap: 20px; flex-direction: column; padding-bottom: 34px; } .stock-card { padding-left: 14px; } .stock-value { gap: 10px; margin-right: 8px; } .stock-name { max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .stock-row { flex-wrap: wrap; gap: 8px; } .stock-value { margin-left: auto; } .buy-button { margin-right: 0; } .buy-form { flex-basis: 100%; } .buy-form-controls, .fund-form-controls, .sell-form-controls { flex-wrap: wrap; } .portfolio-table-header { display: none; } .portfolio-row { grid-template-columns: 1.2fr 1fr; gap: 8px; padding: 14px; } .portfolio-row > :not(:first-child) { text-align: right; } .portfolio-row > :nth-child(3)::before { content: 'Avg: '; color: var(--muted); font-size: 11px; } .portfolio-row > :nth-child(4)::before { content: 'Value: '; color: var(--muted); font-size: 11px; } .portfolio-total strong { font-size: 18px; } .wallet-panel { grid-template-columns: 1fr; margin-top: 24px; } .wallet-actions { flex-wrap: wrap; } .fund-button { justify-self: start; } .withdrawal-history-row { grid-template-columns: 1fr 1fr; gap: 4px 10px; } .withdrawal-history-row time { grid-column: 1 / -1; text-align: left; font-size: 11px; } .sell-form { margin: 0 14px; } }

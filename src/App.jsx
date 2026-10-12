@@ -5,7 +5,6 @@ import Avatar from './Avatar.jsx'
 import CandlestickChart from './CandlestickChart.jsx'
 import Portfolio from './Portfolio.jsx'
 import Profile from './Profile.jsx'
-import Settings from './Settings.jsx'
 import { supabase } from './supabaseClient.js'
 
 const stocks = [
@@ -319,6 +318,494 @@ function AuthScreens({ authView, setAuthView, setIsRecoveryMode, onLogin, onReco
         )}
       </section>
     </main>
+  )
+}
+
+function SettingsPage({ user, onBack, onLogout }) {
+  const [profileId, setProfileId] = useState(null)
+  const [username, setUsername] = useState('')
+  const [savedUsername, setSavedUsername] = useState('')
+  const [isEditingUsername, setIsEditingUsername] = useState(false)
+  const [isLoadingAccount, setIsLoadingAccount] = useState(true)
+  const [isSavingUsername, setIsSavingUsername] = useState(false)
+  const [accountError, setAccountError] = useState('')
+  const [accountSuccess, setAccountSuccess] = useState('')
+  const [securityAction, setSecurityAction] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [isNewPasswordVisible, setIsNewPasswordVisible] = useState(false)
+  const [isConfirmPasswordVisible, setIsConfirmPasswordVisible] = useState(false)
+  const [currentPin, setCurrentPin] = useState('')
+  const [newPin, setNewPin] = useState('')
+  const [confirmPin, setConfirmPin] = useState('')
+  const [accountPassword, setAccountPassword] = useState('')
+  const [isAccountPasswordVisible, setIsAccountPasswordVisible] = useState(false)
+  const [isSecuritySaving, setIsSecuritySaving] = useState(false)
+  const [securityError, setSecurityError] = useState('')
+  const [securitySuccess, setSecuritySuccess] = useState('')
+  const [wrongPinAttempts, setWrongPinAttempts] = useState(0)
+  const [pinLockUntil, setPinLockUntil] = useState(0)
+  const [pinLockRemaining, setPinLockRemaining] = useState(0)
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false)
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState('')
+  const [transactions, setTransactions] = useState([])
+
+  useEffect(() => {
+    let isMounted = true
+
+    const loadUsername = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, username')
+          .eq('id', user.id)
+          .maybeSingle()
+        if (error) throw error
+        if (!isMounted) return
+
+        setProfileId(user.id)
+        setUsername(data?.username ?? '')
+        setSavedUsername(data?.username ?? '')
+      } catch (error) {
+        if (isMounted) setAccountError(error instanceof Error ? error.message : 'Could not load your account details.')
+      } finally {
+        if (isMounted) setIsLoadingAccount(false)
+      }
+    }
+
+    loadUsername()
+    return () => { isMounted = false }
+  }, [user.id])
+
+  useEffect(() => {
+    if (!pinLockUntil) return undefined
+
+    const updateLockRemaining = () => {
+      const remaining = Math.max(0, Math.ceil((pinLockUntil - Date.now()) / 1000))
+      setPinLockRemaining(remaining)
+      if (remaining === 0) {
+        setPinLockUntil(0)
+        setWrongPinAttempts(0)
+        setSecurityError('')
+      }
+    }
+
+    updateLockRemaining()
+    const intervalId = window.setInterval(updateLockRemaining, 1000)
+    return () => window.clearInterval(intervalId)
+  }, [pinLockUntil])
+
+  const saveUsername = async (event) => {
+    event.preventDefault()
+    if (!profileId) return
+
+    const nextUsername = username.trim()
+    setIsSavingUsername(true)
+    setAccountError('')
+    setAccountSuccess('')
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .update({ username: nextUsername })
+        .eq('id', profileId)
+        .select('id')
+        .maybeSingle()
+      if (error) throw error
+      if (!data) throw new Error('Your profile could not be found.')
+      setUsername(nextUsername)
+      setSavedUsername(nextUsername)
+      setIsEditingUsername(false)
+      setAccountSuccess('Username saved successfully.')
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : 'Could not save your username.')
+    } finally {
+      setIsSavingUsername(false)
+    }
+  }
+
+  const startSecurityAction = (action) => {
+    setSecurityAction(action)
+    setSecurityError('')
+    setSecuritySuccess('')
+    setCurrentPin('')
+    setNewPin('')
+    setConfirmPin('')
+    setNewPassword('')
+    setConfirmPassword('')
+    setAccountPassword('')
+  }
+
+  const updatePassword = async (event) => {
+    event.preventDefault()
+    setSecurityError('')
+    setSecuritySuccess('')
+    if (newPassword.length < 8) {
+      setSecurityError('Your password must be at least 8 characters long.')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setSecurityError('The passwords do not match.')
+      return
+    }
+
+    setIsSecuritySaving(true)
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword })
+      if (error) throw error
+      setSecuritySuccess('Password updated successfully.')
+      setNewPassword('')
+      setConfirmPassword('')
+      setSecurityAction('')
+    } catch (error) {
+      setSecurityError(error instanceof Error ? error.message : 'Could not update your password.')
+    } finally {
+      setIsSecuritySaving(false)
+    }
+  }
+
+  const registerIncorrectAttempt = () => {
+    const attempts = wrongPinAttempts + 1
+    setWrongPinAttempts(attempts)
+    if (attempts >= 3) {
+      setPinLockUntil(Date.now() + 60000)
+      setPinLockRemaining(60)
+      setSecurityError('Too many incorrect attempts. Try again in 60 seconds.')
+    }
+  }
+
+  const savePinHash = async (pinHash) => {
+    const { data, error: lookupError } = await supabase
+      .from('user_pins')
+      .select('user_id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+    if (lookupError) throw lookupError
+
+    const result = data
+      ? await supabase.from('user_pins').update({ pin_hash: pinHash }).eq('user_id', user.id)
+      : await supabase.from('user_pins').insert({ user_id: user.id, pin_hash: pinHash })
+    if (result.error) throw result.error
+  }
+
+  const validateNewPin = () => {
+    if (!/^\d{4}$/.test(newPin)) {
+      setSecurityError('Your new PIN must contain exactly 4 digits.')
+      return false
+    }
+    if (newPin !== confirmPin) {
+      setSecurityError('The new PINs do not match.')
+      return false
+    }
+    return true
+  }
+
+  const changePin = async (event) => {
+    event.preventDefault()
+    setSecurityError('')
+    setSecuritySuccess('')
+    if (pinLockRemaining > 0 || !validateNewPin()) return
+
+    setIsSecuritySaving(true)
+    try {
+      const { data, error } = await supabase
+        .from('user_pins')
+        .select('pin_hash')
+        .eq('user_id', user.id)
+        .maybeSingle()
+      if (error) throw error
+      if (!data?.pin_hash) throw new Error('No PIN is set. Use “Forgot PIN?” to create one.')
+
+      const currentPinHash = await hashUserPin(currentPin, user.id)
+      if (currentPinHash !== data.pin_hash) {
+        registerIncorrectAttempt()
+        setSecurityError(wrongPinAttempts >= 2 ? 'Too many incorrect attempts. Try again in 60 seconds.' : 'Current PIN is incorrect.')
+        return
+      }
+
+      await savePinHash(await hashUserPin(newPin, user.id))
+      setWrongPinAttempts(0)
+      setPinLockUntil(0)
+      setPinLockRemaining(0)
+      setCurrentPin('')
+      setNewPin('')
+      setConfirmPin('')
+      setSecurityAction('')
+      setSecuritySuccess('PIN updated successfully.')
+    } catch (error) {
+      setSecurityError(error instanceof Error ? error.message : 'Could not update your PIN.')
+    } finally {
+      setIsSecuritySaving(false)
+    }
+  }
+
+  const verifyAccountPassword = async (event) => {
+    event.preventDefault()
+    setSecurityError('')
+    if (pinLockRemaining > 0) return
+    setIsSecuritySaving(true)
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email: user.email, password: accountPassword })
+      if (error) {
+        registerIncorrectAttempt()
+        setSecurityError(wrongPinAttempts >= 2 ? 'Too many incorrect attempts. Try again in 60 seconds.' : 'Account password is incorrect.')
+        return
+      }
+      setWrongPinAttempts(0)
+      setPinLockUntil(0)
+      setPinLockRemaining(0)
+      setAccountPassword('')
+      setSecurityAction('forgot-set')
+      setSecuritySuccess('Password confirmed. Choose a new PIN.')
+    } catch (error) {
+      setSecurityError(error instanceof Error ? error.message : 'Could not verify your account password.')
+    } finally {
+      setIsSecuritySaving(false)
+    }
+  }
+
+  const setForgottenPin = async (event) => {
+    event.preventDefault()
+    setSecurityError('')
+    setSecuritySuccess('')
+    if (!validateNewPin()) return
+    setIsSecuritySaving(true)
+    try {
+      await savePinHash(await hashUserPin(newPin, user.id))
+      setNewPin('')
+      setConfirmPin('')
+      setSecurityAction('')
+      setSecuritySuccess('PIN updated successfully.')
+    } catch (error) {
+      setSecurityError(error instanceof Error ? error.message : 'Could not update your PIN.')
+    } finally {
+      setIsSecuritySaving(false)
+    }
+  }
+
+  const viewTransactionHistory = async () => {
+    setIsHistoryOpen(true)
+    setIsHistoryLoading(true)
+    setHistoryError('')
+    try {
+      const [depositsResult, withdrawalsResult] = await Promise.all([
+        supabase.from('deposits').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(10),
+        supabase.from('withdrawals').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(10),
+      ])
+      if (depositsResult.error && withdrawalsResult.error) throw depositsResult.error
+
+      const normalize = (rows, type) => (rows ?? []).map((row, index) => ({
+        id: row.id ?? `${type}-${index}`,
+        amount: Number(row.amount ?? row.value ?? 0),
+        method: row.method ?? row.payment_method ?? type,
+        type,
+        date: row.created_at ?? row.createdAt ?? row.date ?? '',
+      }))
+      setTransactions([
+        ...normalize(depositsResult.data, 'Deposit'),
+        ...normalize(withdrawalsResult.data, 'Withdrawal'),
+      ].sort((first, second) => new Date(second.date) - new Date(first.date)).slice(0, 10))
+      if (depositsResult.error || withdrawalsResult.error) setHistoryError('Some transaction history could not be loaded.')
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : 'Could not load transaction history.')
+      setTransactions([])
+    } finally {
+      setIsHistoryLoading(false)
+    }
+  }
+
+  const isEmailVerified = Boolean(user.email_confirmed_at || user.confirmed_at)
+  const pinInput = (id, label, value, onChange, autocomplete = 'new-password') => (
+    <>
+      <label htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        className="settings-pin-input"
+        type="password"
+        inputMode="numeric"
+        pattern="[0-9]{4}"
+        maxLength={4}
+        autoComplete={autocomplete}
+        value={value}
+        onChange={(event) => onChange(event.target.value.replace(/\D/g, '').slice(0, 4))}
+        required
+        disabled={isSecuritySaving || pinLockRemaining > 0}
+      />
+    </>
+  )
+
+  return (
+    <section className="settings-section" aria-labelledby="settings-heading">
+      <button type="button" className="back-button settings-back-button" onClick={onBack}>Back</button>
+      <p className="eyebrow">ACCOUNT</p>
+      <h2 id="settings-heading">Settings</h2>
+
+      {isLoadingAccount ? (
+        <p className="empty-state" role="status">Loading settings...</p>
+      ) : (
+        <div className="settings-card-grid">
+          <article className="settings-card" aria-labelledby="settings-account-heading">
+            <h3 id="settings-account-heading">Account</h3>
+            <div className="settings-account-detail">
+              <span>Email</span>
+              <div className="settings-email-value">
+                <p>{user.email || 'Not provided'}</p>
+                {isEmailVerified && <span className="settings-verified">Verified</span>}
+              </div>
+            </div>
+            <div className="settings-username-block">
+              <h4>Username</h4>
+              {isEditingUsername ? (
+                <form className="settings-username-editor" onSubmit={saveUsername}>
+                  <input
+                    id="settings-username"
+                    type="text"
+                    autoComplete="username"
+                    aria-label="Username"
+                    value={username}
+                    onChange={(event) => { setUsername(event.target.value); setAccountSuccess('') }}
+                    required
+                    disabled={isSavingUsername || !profileId}
+                    autoFocus
+                  />
+                  <button type="submit" className="settings-icon-button settings-confirm-button" aria-label="Confirm username" title="Confirm" disabled={isSavingUsername || !profileId || !username.trim()}>✓</button>
+                  <button
+                    type="button"
+                    className="settings-icon-button settings-cancel-button"
+                    aria-label="Cancel username edit"
+                    title="Cancel"
+                    disabled={isSavingUsername}
+                    onClick={() => { setUsername(savedUsername); setIsEditingUsername(false); setAccountError(''); setAccountSuccess('') }}
+                  >
+                    ×
+                  </button>
+                </form>
+              ) : (
+                <div className="settings-username-display">
+                  <p>{savedUsername || 'Not provided'}</p>
+                  <button
+                    type="button"
+                    className="settings-edit-button"
+                    onClick={() => { setUsername(savedUsername); setIsEditingUsername(true); setAccountError(''); setAccountSuccess('') }}
+                    disabled={!profileId}
+                  >
+                    Edit
+                  </button>
+                </div>
+              )}
+            </div>
+            {accountError && <p className="auth-error" role="alert">{accountError}</p>}
+            {accountSuccess && <p className="confirmation-message" role="status">{accountSuccess}</p>}
+          </article>
+
+          <article className="settings-card" aria-labelledby="settings-security-heading">
+            <h3 id="settings-security-heading">Security</h3>
+            {!securityAction && (
+              <div className="settings-security-actions">
+                <button type="button" className="fund-back-button settings-large-action" onClick={() => startSecurityAction('password')}>Change password</button>
+                <button type="button" className="fund-back-button settings-large-action" onClick={() => startSecurityAction('pin')}>Change PIN</button>
+                <button type="button" className="settings-edit-button settings-forgot-pin" onClick={() => startSecurityAction('forgot-password')}>Forgot PIN?</button>
+              </div>
+            )}
+
+            {securityAction === 'password' && (
+              <form className="settings-security-form" onSubmit={updatePassword}>
+                <label htmlFor="settings-new-password">New password</label>
+                <div className="auth-password-field">
+                  <input id="settings-new-password" type={isNewPasswordVisible ? 'text' : 'password'} autoComplete="new-password" minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required disabled={isSecuritySaving} />
+                  <PasswordVisibilityButton visible={isNewPasswordVisible} onToggle={() => setIsNewPasswordVisible((visible) => !visible)} disabled={isSecuritySaving} />
+                </div>
+                <label htmlFor="settings-confirm-password">Confirm password</label>
+                <div className="auth-password-field">
+                  <input id="settings-confirm-password" type={isConfirmPasswordVisible ? 'text' : 'password'} autoComplete="new-password" minLength={8} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required disabled={isSecuritySaving} />
+                  <PasswordVisibilityButton visible={isConfirmPasswordVisible} onToggle={() => setIsConfirmPasswordVisible((visible) => !visible)} disabled={isSecuritySaving} />
+                </div>
+                <div className="settings-form-actions">
+                  <button type="button" className="fund-back-button" onClick={() => startSecurityAction('')}>Cancel</button>
+                  <button type="submit" className="confirm-button" disabled={isSecuritySaving || newPassword.length < 8 || confirmPassword.length < 8 || newPassword !== confirmPassword}>{isSecuritySaving ? 'Saving...' : 'Update password'}</button>
+                </div>
+              </form>
+            )}
+
+            {securityAction === 'pin' && (
+              <form className="settings-security-form" onSubmit={changePin}>
+                {pinInput('settings-current-pin', 'Current 4-digit PIN', currentPin, setCurrentPin, 'current-password')}
+                {pinInput('settings-new-pin', 'New 4-digit PIN', newPin, setNewPin)}
+                {pinInput('settings-confirm-pin', 'Confirm new PIN', confirmPin, setConfirmPin)}
+                {pinLockRemaining > 0 && <p className="fund-pin-status" role="status">Try again in {pinLockRemaining} seconds.</p>}
+                <div className="settings-form-actions">
+                  <button type="button" className="fund-back-button" onClick={() => startSecurityAction('')}>Cancel</button>
+                  <button type="submit" className="confirm-button" disabled={isSecuritySaving || pinLockRemaining > 0 || currentPin.length !== 4 || newPin.length !== 4 || confirmPin.length !== 4}>{isSecuritySaving ? 'Saving...' : 'Update PIN'}</button>
+                </div>
+              </form>
+            )}
+
+            {securityAction === 'forgot-password' && (
+              <form className="settings-security-form" onSubmit={verifyAccountPassword}>
+                <p className="settings-security-note">Verify your account password before creating a new PIN.</p>
+                <label htmlFor="settings-account-password">Account password</label>
+                <div className="auth-password-field">
+                  <input id="settings-account-password" type={isAccountPasswordVisible ? 'text' : 'password'} autoComplete="current-password" value={accountPassword} onChange={(event) => setAccountPassword(event.target.value)} required disabled={isSecuritySaving || pinLockRemaining > 0} />
+                  <PasswordVisibilityButton visible={isAccountPasswordVisible} onToggle={() => setIsAccountPasswordVisible((visible) => !visible)} disabled={isSecuritySaving || pinLockRemaining > 0} />
+                </div>
+                {pinLockRemaining > 0 && <p className="fund-pin-status" role="status">Try again in {pinLockRemaining} seconds.</p>}
+                <div className="settings-form-actions">
+                  <button type="button" className="fund-back-button" onClick={() => startSecurityAction('')}>Cancel</button>
+                  <button type="submit" className="confirm-button" disabled={isSecuritySaving || pinLockRemaining > 0 || !accountPassword}>{isSecuritySaving ? 'Verifying...' : 'Verify password'}</button>
+                </div>
+              </form>
+            )}
+
+            {securityAction === 'forgot-set' && (
+              <form className="settings-security-form" onSubmit={setForgottenPin}>
+                {pinInput('settings-forgot-new-pin', 'New 4-digit PIN', newPin, setNewPin)}
+                {pinInput('settings-forgot-confirm-pin', 'Confirm new PIN', confirmPin, setConfirmPin)}
+                <div className="settings-form-actions">
+                  <button type="button" className="fund-back-button" onClick={() => startSecurityAction('')}>Cancel</button>
+                  <button type="submit" className="confirm-button" disabled={isSecuritySaving || newPin.length !== 4 || confirmPin.length !== 4 || newPin !== confirmPin}>{isSecuritySaving ? 'Saving...' : 'Save new PIN'}</button>
+                </div>
+              </form>
+            )}
+            {securityError && <p className="fund-pin-error" role="alert">{securityError}</p>}
+            {securitySuccess && <p className="confirmation-message" role="status">{securitySuccess}</p>}
+          </article>
+
+          <article className="settings-card settings-history-card" aria-labelledby="settings-history-heading">
+            <div className="settings-card-heading">
+              <h3 id="settings-history-heading">Transaction history</h3>
+              <button type="button" className="confirm-button settings-history-button" onClick={viewTransactionHistory} disabled={isHistoryLoading}>
+                {isHistoryLoading ? 'Loading...' : isHistoryOpen ? 'Refresh history' : 'View history'}
+              </button>
+            </div>
+            {isHistoryOpen && (
+              <div className="settings-history-content" aria-live="polite">
+                {historyError && <p className="fund-pin-status" role="status">{historyError}</p>}
+                {isHistoryLoading ? (
+                  <p className="fund-pin-status" role="status">Loading recent transactions...</p>
+                ) : transactions.length ? (
+                  <ul className="settings-transaction-list">
+                    {transactions.map((transaction) => (
+                      <li key={`${transaction.type}-${transaction.id}`}>
+                        <div>
+                          <strong>{transaction.type}</strong>
+                          <span>{transaction.method}</span>
+                        </div>
+                        <div className="settings-transaction-value">
+                          <strong>${transaction.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                          <time dateTime={transaction.date}>{transaction.date ? new Date(transaction.date).toLocaleString() : 'Date unavailable'}</time>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : !historyError && <p className="withdrawal-empty-state">No recent transactions.</p>}
+              </div>
+            )}
+          </article>
+        </div>
+      )}
+
+      <button type="button" className="settings-logout-button" onClick={onLogout}>Log out</button>
+    </section>
   )
 }
 
@@ -1610,10 +2097,14 @@ function App() {
       ) : (
         <>
       {activeTab === 'settings' && (
-        <Settings onBack={() => {
-          setActiveTab(settingsReturnView.tab)
-          setSelectedSymbol(settingsReturnView.selectedSymbol)
-        }} />
+        <SettingsPage
+          user={user}
+          onBack={() => {
+            setActiveTab(settingsReturnView.tab)
+            setSelectedSymbol(settingsReturnView.selectedSymbol)
+          }}
+          onLogout={logOut}
+        />
       )}
 
       {activeTab === 'profile' && (
