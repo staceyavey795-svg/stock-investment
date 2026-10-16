@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import AdminSupport from './AdminSupport.jsx'
 import { supabase } from './supabaseClient.js'
 
 function formatCurrency(value) {
@@ -58,7 +59,7 @@ function DataSection({ title, rows, isLoading, error, emptyMessage, children }) 
   )
 }
 
-function Admin({ onBack }) {
+function Admin({ onBack, user }) {
   const [page, setPage] = useState('overview')
   const [users, setUsers] = useState([])
   const [isLoadingUsers, setIsLoadingUsers] = useState(true)
@@ -301,6 +302,7 @@ function Admin({ onBack }) {
               <p className="admin-state">{search ? 'No users match your search.' : 'No users found.'}</p>
             )}
           </section>
+          <AdminSupport adminId={user?.id} />
         </>
       )}
 

@@ -4,6 +4,7 @@ import './App.css'
 import Avatar from './Avatar.jsx'
 import Admin from './Admin.jsx'
 import CandlestickChart from './CandlestickChart.jsx'
+import ChatBubble from './ChatBubble.jsx'
 import Portfolio from './Portfolio.jsx'
 import Profile from './Profile.jsx'
 import logo from './assets/logo.webp'
@@ -2410,7 +2411,7 @@ function App() {
       )}
 
       {activeTab === 'admin' && isAdmin && (
-        <Admin onBack={() => setActiveTab('home')} />
+        <Admin user={user} onBack={() => setActiveTab('home')} />
       )}
 
       {activeTab === 'profile' && (
@@ -2473,6 +2474,7 @@ function App() {
         </div>
       </section>
       )}
+      {activeTab !== 'admin' && <ChatBubble user={user} />}
         </>
       )}
     </main>
