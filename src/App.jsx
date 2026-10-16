@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import './App.css'
 import Avatar from './Avatar.jsx'
+import Admin from './Admin.jsx'
 import CandlestickChart from './CandlestickChart.jsx'
 import Portfolio from './Portfolio.jsx'
 import Profile from './Profile.jsx'
@@ -903,6 +904,9 @@ function App() {
   const [settingsReturnView, setSettingsReturnView] = useState({ tab: 'home', selectedSymbol: null })
   const [aboutReturnView, setAboutReturnView] = useState({ tab: 'home', selectedSymbol: null })
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [adminAccess, setAdminAccess] = useState({ userId: null, isAdmin: false })
+  const isAdmin = adminAccess.userId === user?.id && adminAccess.isAdmin
+  const isCheckingAdmin = Boolean(user?.id) && adminAccess.userId !== user.id
   const [watchlistState, setWatchlistState] = useState({ userId: null, symbols: [], error: '' })
   const watchlist = watchlistState.userId === user?.id ? watchlistState.symbols : []
   const isLoadingWatchlist = Boolean(user?.id) && watchlistState.userId !== user.id
@@ -989,6 +993,39 @@ function App() {
       subscription.unsubscribe()
     }
   }, [])
+
+  useEffect(() => {
+    if (!user?.id) return undefined
+
+    let isCurrent = true
+    const userId = user.id
+    const checkAdminAccess = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('admins')
+          .select('user_id')
+          .eq('user_id', userId)
+          .maybeSingle()
+        if (error) throw error
+        if (isCurrent) setAdminAccess({ userId, isAdmin: Boolean(data?.user_id) })
+      } catch {
+        if (isCurrent) setAdminAccess({ userId, isAdmin: false })
+      }
+    }
+
+    checkAdminAccess()
+    return () => { isCurrent = false }
+  }, [user?.id])
+
+  useEffect(() => {
+    if (activeTab !== 'admin' || isCheckingAdmin || isAdmin) return
+
+    const redirectId = window.setTimeout(() => {
+      setActiveTab('home')
+      setSelectedSymbol(null)
+    }, 0)
+    return () => window.clearTimeout(redirectId)
+  }, [activeTab, isAdmin, isCheckingAdmin])
 
   useEffect(() => {
     let isCurrent = true
@@ -1692,6 +1729,8 @@ function App() {
     return <AuthScreens authView={authView} setAuthView={setAuthView} setIsRecoveryMode={setIsRecoveryMode} onLogin={handleAuthSuccess} onRecoveryComplete={completePasswordRecovery} serverError={authError} onClearError={() => setAuthError('')} />
   }
 
+  if (activeTab === 'admin' && !isAdmin) return null
+
   return (
     <main className={activeTab === 'about' ? 'app-shell about-app-shell' : 'app-shell'}>
       {activeTab !== 'about' && (
@@ -1796,7 +1835,7 @@ function App() {
 
       {activeTab !== 'about' && authError && <p className="auth-error" role="alert">{authError}</p>}
 
-      {activeTab !== 'settings' && activeTab !== 'about' && <nav className="tab-nav" aria-label="Primary navigation">
+      {activeTab !== 'settings' && activeTab !== 'about' && activeTab !== 'admin' && <nav className="tab-nav" aria-label="Primary navigation">
         {[
           ['home', 'Home'],
           ['watchlist', 'Watchlist'],
@@ -1819,6 +1858,19 @@ function App() {
 
       {activeTab === 'home' && (
         <section className="wallet-panel" aria-labelledby="wallet-heading">
+          {isAdmin && (
+            <button
+              type="button"
+              tabIndex={isMenuOpen ? 0 : -1}
+              onClick={() => {
+                setActiveTab('admin')
+                setSelectedSymbol(null)
+                setIsMenuOpen(false)
+              }}
+            >
+              Admin
+            </button>
+          )}
           <div>
             <p className="eyebrow">AVAILABLE FUNDS</p>
             <h2 id="wallet-heading">
@@ -2355,6 +2407,10 @@ function App() {
           }}
           onLogout={logOut}
         />
+      )}
+
+      {activeTab === 'admin' && isAdmin && (
+        <Admin onBack={() => setActiveTab('home')} />
       )}
 
       {activeTab === 'profile' && (
