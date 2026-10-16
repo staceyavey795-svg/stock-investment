@@ -1818,6 +1818,19 @@ function App() {
           >
             About
           </button>
+          {isAdmin && (
+            <button
+              type="button"
+              tabIndex={isMenuOpen ? 0 : -1}
+              onClick={() => {
+                setActiveTab('admin')
+                setSelectedSymbol(null)
+                setIsMenuOpen(false)
+              }}
+            >
+              Admin
+            </button>
+          )}
         </nav>
       </aside>
 
@@ -1858,19 +1871,6 @@ function App() {
 
       {activeTab === 'home' && (
         <section className="wallet-panel" aria-labelledby="wallet-heading">
-          {isAdmin && (
-            <button
-              type="button"
-              tabIndex={isMenuOpen ? 0 : -1}
-              onClick={() => {
-                setActiveTab('admin')
-                setSelectedSymbol(null)
-                setIsMenuOpen(false)
-              }}
-            >
-              Admin
-            </button>
-          )}
           <div>
             <p className="eyebrow">AVAILABLE FUNDS</p>
             <h2 id="wallet-heading">
