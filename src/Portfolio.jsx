@@ -4,7 +4,7 @@ function formatCurrency(value) {
   return value.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
 }
 
-function Portfolio({ holdings, onSell, onStockSelect }) {
+function Portfolio({ holdings, onSell, onStockSelect, isLoading, error, pendingSellSymbol, sellErrors }) {
   const [sellingSymbol, setSellingSymbol] = useState(null)
   const [sharesToSell, setSharesToSell] = useState('')
 
@@ -23,13 +23,13 @@ function Portfolio({ holdings, onSell, onStockSelect }) {
     setSharesToSell('')
   }
 
-  const submitSell = (event, holding) => {
+  const submitSell = async (event, holding) => {
     event.preventDefault()
     const shares = Number(sharesToSell)
-    if (shares <= 0 || shares > holding.quantity) return
+    if (shares <= 0 || shares > holding.quantity || pendingSellSymbol) return
 
-    onSell(holding.symbol, shares)
-    closeSellForm()
+    const succeeded = await onSell(holding.symbol, shares)
+    if (succeeded) closeSellForm()
   }
 
   return (
@@ -41,11 +41,15 @@ function Portfolio({ holdings, onSell, onStockSelect }) {
         </div>
         <div className="portfolio-total">
           <span>Total portfolio value</span>
-          <strong>{formatCurrency(totalPortfolioValue)}</strong>
+          <strong>{isLoading ? 'Loading...' : formatCurrency(totalPortfolioValue)}</strong>
         </div>
       </div>
 
-      {holdings.length > 0 ? (
+      {isLoading ? (
+        <p className="empty-state" role="status">Loading holdings...</p>
+      ) : error ? (
+        <p className="empty-state" role="alert">{error}</p>
+      ) : holdings.length > 0 ? (
         <div className="portfolio-list">
           <div className="portfolio-table-header" aria-hidden="true">
             <span>Stock</span>
@@ -84,8 +88,9 @@ function Portfolio({ holdings, onSell, onStockSelect }) {
                   type="button"
                   className="sell-button"
                   onClick={() => (sellingSymbol === holding.symbol ? closeSellForm() : openSellForm(holding.symbol))}
+                  disabled={Boolean(pendingSellSymbol)}
                 >
-                  {sellingSymbol === holding.symbol ? 'Close' : 'Sell'}
+                  {pendingSellSymbol === holding.symbol ? 'Selling...' : sellingSymbol === holding.symbol ? 'Close' : 'Sell'}
                 </button>
               </article>
               {sellingSymbol === holding.symbol && (
@@ -102,12 +107,14 @@ function Portfolio({ holdings, onSell, onStockSelect }) {
                       value={sharesToSell}
                       onChange={(event) => setSharesToSell(event.target.value)}
                       autoFocus
+                      disabled={pendingSellSymbol === holding.symbol}
                     />
-                    <button type="submit" className="confirm-button" disabled={!sharesToSell || Number(sharesToSell) <= 0 || Number(sharesToSell) > holding.quantity}>
-                      Confirm sell
+                    <button type="submit" className="confirm-button" disabled={!sharesToSell || Number(sharesToSell) <= 0 || Number(sharesToSell) > holding.quantity || Boolean(pendingSellSymbol)}>
+                      {pendingSellSymbol === holding.symbol ? 'Selling...' : 'Confirm sell'}
                     </button>
                   </div>
                   <p className="sell-limit">Maximum: {holding.quantity.toFixed(4)} shares. Proceeds: {formatCurrency((Number(sharesToSell) || 0) * holding.currentPrice)}.</p>
+                  {sellErrors[holding.symbol] && <p className="buy-error" role="alert">{sellErrors[holding.symbol]}</p>}
                 </form>
               )}
             </div>

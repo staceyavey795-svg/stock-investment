@@ -24,7 +24,34 @@ const stocks = [
   { symbol: 'JPH', name: 'JP Homes Inc.', price: '$64.75', change: '0.00%', positive: true },
 ]
 
-const STORAGE_KEY = 'stock-investment-state'
+async function fetchUserHoldings(userId) {
+  const { data, error } = await supabase
+    .from('holdings')
+    .select('symbol, name, quantity, avg_price')
+    .eq('user_id', userId)
+  if (error) throw error
+
+  return Object.fromEntries((data ?? []).map((holding) => {
+    const stock = stocks.find((item) => item.symbol === holding.symbol)
+    const averageBuyPrice = Number(holding.avg_price)
+    return [holding.symbol, {
+      symbol: holding.symbol,
+      name: holding.name,
+      quantity: Number(holding.quantity),
+      averageBuyPrice,
+      currentPrice: stock ? Number.parseFloat(stock.price.replace('$', '')) : averageBuyPrice,
+    }]
+  }))
+}
+
+async function fetchUserWatchlist(userId) {
+  const { data, error } = await supabase
+    .from('watchlist')
+    .select('symbol, name')
+    .eq('user_id', userId)
+  if (error) throw error
+  return (data ?? []).map((item) => item.symbol)
+}
 
 function getInitialAuthUrlState() {
   const query = new URLSearchParams(window.location.search)
@@ -593,21 +620,28 @@ function SettingsPage({ user, onBack, onLogout }) {
     setHistoryError('')
     try {
       const [depositsResult, withdrawalsResult] = await Promise.all([
-        supabase.from('deposits').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(10),
+        supabase.from('deposits').select('id, amount, method, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(10),
         supabase.from('withdrawals').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(10),
       ])
       if (depositsResult.error && withdrawalsResult.error) throw depositsResult.error
 
-      const normalize = (rows, type) => (rows ?? []).map((row, index) => ({
-        id: row.id ?? `${type}-${index}`,
+      const normalizeWithdrawals = (rows) => (rows ?? []).map((row, index) => ({
+        id: row.id ?? `Withdrawal-${index}`,
         amount: Number(row.amount ?? row.value ?? 0),
-        method: row.method ?? row.payment_method ?? type,
-        type,
+        method: row.method ?? row.payment_method ?? 'Withdrawal',
+        type: 'Withdrawal',
         date: row.created_at ?? row.createdAt ?? row.date ?? '',
       }))
+      const normalizeDeposits = (rows) => (rows ?? []).map((row, index) => ({
+        id: row.id ?? `Deposit-${index}`,
+        amount: Number(row.amount ?? 0),
+        method: row.method ?? 'Deposit',
+        type: 'Deposit',
+        date: row.created_at ?? '',
+      }))
       setTransactions([
-        ...normalize(depositsResult.data, 'Deposit'),
-        ...normalize(withdrawalsResult.data, 'Withdrawal'),
+        ...normalizeDeposits(depositsResult.data),
+        ...normalizeWithdrawals(withdrawalsResult.data),
       ].sort((first, second) => new Date(second.date) - new Date(first.date)).slice(0, 10))
       if (depositsResult.error || withdrawalsResult.error) setHistoryError('Some transaction history could not be loaded.')
     } catch (error) {
@@ -858,33 +892,7 @@ function getOhlcHistory(stock, priceHistory) {
   })
 }
 
-function loadSavedState() {
-  const defaultState = { walletBalance: 10000, portfolio: {}, watchlist: [] }
-
-  try {
-    if (typeof window === 'undefined') return defaultState
-
-    const savedState = JSON.parse(window.localStorage.getItem(STORAGE_KEY))
-    if (!savedState || typeof savedState !== 'object') return defaultState
-
-    return {
-      walletBalance: Number.isFinite(savedState.walletBalance) && savedState.walletBalance >= 0
-        ? savedState.walletBalance
-        : defaultState.walletBalance,
-      portfolio: savedState.portfolio && typeof savedState.portfolio === 'object' && !Array.isArray(savedState.portfolio)
-        ? savedState.portfolio
-        : defaultState.portfolio,
-      watchlist: Array.isArray(savedState.watchlist)
-        ? savedState.watchlist.filter((symbol) => typeof symbol === 'string')
-        : defaultState.watchlist,
-    }
-  } catch {
-    return defaultState
-  }
-}
-
 function App() {
-  const [initialState] = useState(loadSavedState)
   const [user, setUser] = useState(null)
   const [avatarRefreshKey, setAvatarRefreshKey] = useState(0)
   const [isCheckingSession, setIsCheckingSession] = useState(true)
@@ -895,13 +903,26 @@ function App() {
   const [settingsReturnView, setSettingsReturnView] = useState({ tab: 'home', selectedSymbol: null })
   const [aboutReturnView, setAboutReturnView] = useState({ tab: 'home', selectedSymbol: null })
   const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [watchlist, setWatchlist] = useState(initialState.watchlist)
+  const [watchlistState, setWatchlistState] = useState({ userId: null, symbols: [], error: '' })
+  const watchlist = watchlistState.userId === user?.id ? watchlistState.symbols : []
+  const isLoadingWatchlist = Boolean(user?.id) && watchlistState.userId !== user.id
+  const watchlistError = watchlistState.userId === user?.id ? watchlistState.error : ''
+  const [watchlistBusySymbol, setWatchlistBusySymbol] = useState(null)
   const [buyingSymbol, setBuyingSymbol] = useState(null)
+  const [pendingBuySymbol, setPendingBuySymbol] = useState(null)
   const [investmentAmounts, setInvestmentAmounts] = useState({})
   const [confirmedOrders, setConfirmedOrders] = useState({})
-  const [portfolio, setPortfolio] = useState(initialState.portfolio)
-  const [walletBalance, setWalletBalance] = useState(initialState.walletBalance)
-  const walletBalanceRef = useRef(initialState.walletBalance)
+  const [portfolioState, setPortfolioState] = useState({ userId: null, holdings: {}, error: '' })
+  const portfolio = portfolioState.userId === user?.id ? portfolioState.holdings : {}
+  const isLoadingPortfolio = Boolean(user?.id) && portfolioState.userId !== user.id
+  const portfolioError = portfolioState.userId === user?.id ? portfolioState.error : ''
+  const [pendingSellSymbol, setPendingSellSymbol] = useState(null)
+  const [sellErrors, setSellErrors] = useState({})
+  const [walletState, setWalletState] = useState({ userId: null, balance: null, error: '' })
+  const walletBalance = walletState.userId === user?.id ? walletState.balance : null
+  const isLoadingWallet = Boolean(user?.id) && walletState.userId !== user.id
+  const walletError = walletState.userId === user?.id ? walletState.error : ''
+  const walletBalanceRef = useRef(0)
   const [isFunding, setIsFunding] = useState(false)
   const [fundingAmount, setFundingAmount] = useState('')
   const [fundingStep, setFundingStep] = useState('amount')
@@ -933,7 +954,7 @@ function App() {
 
   const updateWalletBalance = (nextBalance) => {
     walletBalanceRef.current = nextBalance
-    setWalletBalance(nextBalance)
+    setWalletState({ userId: user?.id ?? null, balance: nextBalance, error: '' })
   }
 
   useEffect(() => {
@@ -970,19 +991,77 @@ function App() {
   }, [])
 
   useEffect(() => {
+    let isCurrent = true
+
+    if (!user?.id) {
+      walletBalanceRef.current = 0
+      return () => { isCurrent = false }
+    }
+
+    walletBalanceRef.current = 0
+    const userId = user.id
+
+    const loadWallet = async () => {
+      try {
+        const { data, error } = await supabase.rpc('ensure_wallet')
+        if (error) throw error
+        if (data == null || !Number.isFinite(Number(data))) {
+          throw new Error('The wallet returned an invalid balance.')
+        }
+        if (isCurrent) {
+          const balance = Number(data)
+          walletBalanceRef.current = balance
+          setWalletState({ userId, balance, error: '' })
+        }
+      } catch (error) {
+        if (isCurrent) {
+          setWalletState({
+            userId,
+            balance: null,
+            error: error instanceof Error ? error.message : 'Could not load your wallet balance.',
+          })
+        }
+      }
+    }
+
+    loadWallet()
+    return () => { isCurrent = false }
+  }, [user?.id])
+
+  useEffect(() => {
+    if (!user?.id) return undefined
+
+    let isCurrent = true
+    const userId = user.id
+    Promise.allSettled([fetchUserHoldings(userId), fetchUserWatchlist(userId)])
+      .then(([holdingsResult, watchlistResult]) => {
+        if (!isCurrent) return
+
+        setPortfolioState(holdingsResult.status === 'fulfilled'
+          ? { userId, holdings: holdingsResult.value, error: '' }
+          : {
+            userId,
+            holdings: {},
+            error: holdingsResult.reason instanceof Error ? holdingsResult.reason.message : 'Could not load your holdings.',
+          })
+        setWatchlistState(watchlistResult.status === 'fulfilled'
+          ? { userId, symbols: watchlistResult.value, error: '' }
+          : {
+            userId,
+            symbols: [],
+            error: watchlistResult.reason instanceof Error ? watchlistResult.reason.message : 'Could not load your watchlist.',
+          })
+      })
+
+    return () => { isCurrent = false }
+  }, [user?.id])
+
+  useEffect(() => {
     if (authView !== 'updated') return undefined
 
     const timeoutId = window.setTimeout(() => setAuthView('login'), 1400)
     return () => window.clearTimeout(timeoutId)
   }, [authView])
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ walletBalance, portfolio, watchlist }))
-    } catch {
-      // Storage can be unavailable or full; the app remains usable for this session.
-    }
-  }, [walletBalance, portfolio, watchlist])
 
   useEffect(() => {
     if (!user?.id) return undefined
@@ -1049,12 +1128,55 @@ function App() {
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [isMenuOpen])
 
-  const toggleWatchlist = (symbol) => {
-    setWatchlist((currentWatchlist) =>
-      currentWatchlist.includes(symbol)
-        ? currentWatchlist.filter((item) => item !== symbol)
-        : [...currentWatchlist, symbol],
-    )
+  const refreshHoldings = async (userId) => {
+    try {
+      const holdings = await fetchUserHoldings(userId)
+      if (user?.id === userId) setPortfolioState({ userId, holdings, error: '' })
+      return true
+    } catch (error) {
+      if (user?.id === userId) {
+        setPortfolioState((currentState) => ({
+          userId,
+          holdings: currentState.userId === userId ? currentState.holdings : {},
+          error: error instanceof Error ? error.message : 'Could not reload your holdings.',
+        }))
+      }
+      return false
+    }
+  }
+
+  const toggleWatchlist = async (stock) => {
+    if (!user?.id || watchlistBusySymbol) return
+
+    const userId = user.id
+    const isRemoving = watchlist.includes(stock.symbol)
+    setWatchlistBusySymbol(stock.symbol)
+    setWatchlistState((currentState) => currentState.userId === userId
+      ? { ...currentState, error: '' }
+      : currentState)
+
+    try {
+      const result = isRemoving
+        ? await supabase.from('watchlist').delete().eq('user_id', userId).eq('symbol', stock.symbol)
+        : await supabase.from('watchlist').insert({ user_id: userId, symbol: stock.symbol, name: stock.name })
+      if (result.error) throw result.error
+
+      setWatchlistState((currentState) => {
+        const currentSymbols = currentState.userId === userId ? currentState.symbols : []
+        const symbols = isRemoving
+          ? currentSymbols.filter((symbol) => symbol !== stock.symbol)
+          : currentSymbols.includes(stock.symbol) ? currentSymbols : [...currentSymbols, stock.symbol]
+        return { userId, symbols, error: '' }
+      })
+    } catch (error) {
+      setWatchlistState((currentState) => ({
+        userId,
+        symbols: currentState.userId === userId ? currentState.symbols : [],
+        error: error instanceof Error ? error.message : 'Could not update your watchlist.',
+      }))
+    } finally {
+      setWatchlistBusySymbol(null)
+    }
   }
 
   const openBuyForm = (symbol) => {
@@ -1073,56 +1195,80 @@ function App() {
     setBuyError((currentErrors) => ({ ...currentErrors, [symbol]: '' }))
   }
 
-  const confirmBuy = (stock) => {
+  const confirmBuy = async (stock) => {
     const amount = Number(investmentAmounts[stock.symbol])
     const currentPrice = Number(stock.price.replace('$', ''))
-    if (amount <= 0) return
-    if (amount > walletBalanceRef.current) {
-      setBuyError((currentErrors) => ({ ...currentErrors, [stock.symbol]: 'Insufficient wallet balance.' }))
+    if (!user?.id || !Number.isFinite(amount) || amount <= 0 || pendingBuySymbol) return
+    if (isLoadingWallet || walletBalance == null) {
+      setBuyError((currentErrors) => ({ ...currentErrors, [stock.symbol]: walletError || 'Wallet balance is unavailable.' }))
       return
     }
 
     const quantity = amount / currentPrice
-    setPortfolio((currentPortfolio) => {
-      const existingHolding = currentPortfolio[stock.symbol]
-      const totalInvested = (existingHolding?.totalInvested || 0) + amount
-      const totalQuantity = (existingHolding?.quantity || 0) + quantity
+    const userId = user.id
+    setPendingBuySymbol(stock.symbol)
+    setBuyError((currentErrors) => ({ ...currentErrors, [stock.symbol]: '' }))
+    setConfirmedOrders((currentOrders) => ({ ...currentOrders, [stock.symbol]: false }))
 
-      return {
-        ...currentPortfolio,
-        [stock.symbol]: {
-          symbol: stock.symbol,
-          name: stock.name,
-          quantity: totalQuantity,
-          totalInvested,
-          averageBuyPrice: totalInvested / totalQuantity,
-          currentPrice,
-        },
+    try {
+      const { data, error } = await supabase.rpc('buy_stock', {
+        p_symbol: stock.symbol,
+        p_name: stock.name,
+        p_quantity: quantity,
+        p_price: currentPrice,
+      })
+      if (error) {
+        if (/insufficient funds/i.test(error.message)) throw new Error('Insufficient funds')
+        throw error
       }
-    })
-    updateWalletBalance(walletBalanceRef.current - amount)
-    setConfirmedOrders((currentOrders) => ({ ...currentOrders, [stock.symbol]: true }))
+      if (data == null || !Number.isFinite(Number(data))) throw new Error('The wallet returned an invalid balance.')
+      if (user?.id !== userId) return
+
+      updateWalletBalance(Number(data))
+      setConfirmedOrders((currentOrders) => ({ ...currentOrders, [stock.symbol]: true }))
+      await refreshHoldings(userId)
+    } catch (error) {
+      setBuyError((currentErrors) => ({
+        ...currentErrors,
+        [stock.symbol]: error instanceof Error ? error.message : 'Could not complete your purchase.',
+      }))
+    } finally {
+      setPendingBuySymbol(null)
+    }
   }
 
-  const sellHolding = (symbol, shares) => {
+  const sellHolding = async (symbol, shares) => {
     const holding = portfolio[symbol]
-    if (!holding || shares <= 0 || shares > holding.quantity) return
+    if (!user?.id || !holding || !Number.isFinite(shares) || shares <= 0 || pendingSellSymbol) return false
 
-    const proceeds = shares * holding.currentPrice
-    const remainingQuantity = holding.quantity - shares
-    setPortfolio((currentPortfolio) => {
-      if (remainingQuantity <= 0.0000001) {
-        const remainingPortfolio = { ...currentPortfolio }
-        delete remainingPortfolio[symbol]
-        return remainingPortfolio
+    const userId = user.id
+    setPendingSellSymbol(symbol)
+    setSellErrors((currentErrors) => ({ ...currentErrors, [symbol]: '' }))
+    try {
+      const { data, error } = await supabase.rpc('sell_stock', {
+        p_symbol: symbol,
+        p_quantity: shares,
+        p_price: holding.currentPrice,
+      })
+      if (error) {
+        if (/not enough shares/i.test(error.message)) throw new Error('Not enough shares')
+        throw error
       }
+      if (data == null || !Number.isFinite(Number(data))) throw new Error('The wallet returned an invalid balance.')
+      if (user?.id !== userId) return false
 
-      return {
-        ...currentPortfolio,
-        [symbol]: { ...holding, quantity: remainingQuantity },
-      }
-    })
-    updateWalletBalance(walletBalanceRef.current + proceeds)
+      updateWalletBalance(Number(data))
+      await refreshHoldings(userId)
+      return true
+    } catch (error) {
+      setSellErrors((currentErrors) => ({
+        ...currentErrors,
+        [symbol]: error instanceof Error ? error.message : 'Could not complete your sale.',
+      }))
+      return false
+    } finally {
+      setPendingSellSymbol(null)
+    }
   }
 
   const choosePaymentMethod = (event) => {
@@ -1134,6 +1280,10 @@ function App() {
   const chooseWithdrawalMethod = (event) => {
     event.preventDefault()
     const amount = Number(withdrawalAmount)
+    if (isLoadingWallet || walletBalance == null) {
+      setWithdrawalError(walletError || 'Wallet balance is unavailable. Please try again.')
+      return
+    }
     if (!withdrawalAmount || !Number.isFinite(amount) || amount <= 0) return
     if (amount > walletBalanceRef.current) {
       setWithdrawalError('Amount exceeds your available balance.')
@@ -1169,12 +1319,24 @@ function App() {
     }
   }
 
-  const fundWallet = () => {
+  const fundWallet = async () => {
     const amount = Number(fundingAmount)
-    if (amount <= 0 || !paymentMethod) return
+    if (amount <= 0 || !paymentMethod || !user?.id) return
 
-    updateWalletBalance(walletBalanceRef.current + amount)
-    setFundingStep('success')
+    setPinError('')
+    setWalletState((currentState) => ({ ...currentState, error: '' }))
+    try {
+      const { data, error } = await supabase.rpc('add_funds', { p_amount: amount, p_method: paymentMethod })
+      if (error) throw error
+      if (data == null || !Number.isFinite(Number(data))) {
+        throw new Error('The wallet returned an invalid balance.')
+      }
+
+      updateWalletBalance(Number(data))
+      setFundingStep('success')
+    } catch (error) {
+      setPinError(error instanceof Error ? error.message : 'Could not add funds to your wallet.')
+    }
   }
 
   const checkWithdrawalPin = async (event) => {
@@ -1208,20 +1370,23 @@ function App() {
     const amount = Number(withdrawalAmount)
     if (!user?.id || !withdrawalMethod || !Number.isFinite(amount) || amount <= 0) return false
 
-    const currentBalance = walletBalanceRef.current
-    if (amount > currentBalance) {
-      setPinError('Amount exceeds your available balance.')
-      return false
-    }
-
-    updateWalletBalance(currentBalance - amount)
     try {
-      const { error } = await supabase.from('withdrawals').insert({
-        user_id: user.id,
-        amount,
-        method: withdrawalMethod,
+      const { data, error } = await supabase.rpc('withdraw_funds', {
+        p_amount: amount,
+        p_method: withdrawalMethod,
       })
-      if (error) throw error
+      if (error) {
+        if (/insufficient[\s_]+funds/i.test(error.message)) {
+          setPinError('Amount exceeds your available balance')
+          return false
+        }
+        throw error
+      }
+      if (data == null || !Number.isFinite(Number(data))) {
+        throw new Error('The wallet returned an invalid balance.')
+      }
+
+      updateWalletBalance(Number(data))
 
       const newWithdrawal = {
         id: `local-${Date.now()}`,
@@ -1239,8 +1404,7 @@ function App() {
       setPinError('')
       return true
     } catch (error) {
-      updateWalletBalance(walletBalanceRef.current + amount)
-      setPinError(error instanceof Error ? error.message : 'Could not record this withdrawal. Please try again.')
+      setPinError(error instanceof Error ? error.message : 'Could not withdraw funds. Please try again.')
       return false
     }
   }
@@ -1326,7 +1490,7 @@ function App() {
       if (error) throw error
 
       setSavedPinHash(pinHash)
-      fundWallet()
+      await fundWallet()
     } catch (error) {
       setPinError(error instanceof Error ? error.message : 'Could not save your PIN.')
     } finally {
@@ -1345,7 +1509,7 @@ function App() {
       if (enteredPinHash === savedPinHash) {
         setWrongPinAttempts(0)
         setPin('')
-        fundWallet()
+        await fundWallet()
         return
       }
 
@@ -1424,11 +1588,13 @@ function App() {
 
   const StockCard = ({ stock }) => {
     const isWatched = watchlist.includes(stock.symbol)
+    const isSavingWatchlist = watchlistBusySymbol === stock.symbol
     const investmentAmount = investmentAmounts[stock.symbol] || ''
     const numericAmount = Number(investmentAmount)
     const stockPrice = Number.parseFloat(stock.price.replace('$', ''))
     const fractionalShares = numericAmount > 0 ? numericAmount / stockPrice : 0
     const isBuying = buyingSymbol === stock.symbol
+    const isPendingBuy = pendingBuySymbol === stock.symbol
     const isConfirmed = confirmedOrders[stock.symbol]
     const errorMessage = buyError[stock.symbol]
 
@@ -1471,11 +1637,12 @@ function App() {
           <button
             type="button"
             className={isWatched ? 'watch-button active' : 'watch-button'}
-            onClick={() => toggleWatchlist(stock.symbol)}
-            aria-label={isWatched ? `Remove ${stock.symbol} from watchlist` : `Add ${stock.symbol} to watchlist`}
+            onClick={() => toggleWatchlist(stock)}
+            aria-label={isSavingWatchlist ? `Saving ${stock.symbol} watchlist change` : isWatched ? `Remove ${stock.symbol} from watchlist` : `Add ${stock.symbol} to watchlist`}
             aria-pressed={isWatched}
+            disabled={isLoadingWatchlist || Boolean(watchlistBusySymbol)}
           >
-            {isWatched ? '★' : '☆'}
+            {isSavingWatchlist ? '…' : isWatched ? '★' : '☆'}
           </button>
         </div>
         {isBuying && (
@@ -1491,9 +1658,10 @@ function App() {
                 value={investmentAmount}
                 onChange={(event) => updateInvestmentAmount(stock.symbol, event.target.value)}
                 autoFocus
+                disabled={isPendingBuy}
               />
-              <button type="submit" className="confirm-button" disabled={!investmentAmount || Number(investmentAmount) <= 0}>
-                Confirm buy
+              <button type="submit" className="confirm-button" disabled={!investmentAmount || Number(investmentAmount) <= 0 || isLoadingWallet || walletBalance == null || Boolean(pendingBuySymbol)}>
+                {isPendingBuy ? 'Buying...' : isLoadingWallet ? 'Loading balance...' : 'Confirm buy'}
               </button>
             </div>
             {investmentAmount && Number(investmentAmount) > 0 && (
@@ -1653,7 +1821,14 @@ function App() {
         <section className="wallet-panel" aria-labelledby="wallet-heading">
           <div>
             <p className="eyebrow">AVAILABLE FUNDS</p>
-            <h2 id="wallet-heading">${walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h2>
+            <h2 id="wallet-heading">
+              {isLoadingWallet
+                ? 'Loading balance...'
+                : walletBalance == null
+                  ? 'Balance unavailable'
+                  : `$${walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            </h2>
+            {walletError && <p className="fund-pin-error" role="alert">{walletError}</p>}
           </div>
           <div className="wallet-actions">
             <button
@@ -1835,7 +2010,13 @@ function App() {
               {withdrawalStep === 'amount' && (
                 <form onSubmit={chooseWithdrawalMethod}>
                   <p className="fund-amount-summary">
-                    Available balance <strong>${walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                    Available balance <strong>
+                      {isLoadingWallet
+                        ? 'Loading...'
+                        : walletBalance == null
+                          ? 'Unavailable'
+                          : `$${walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                    </strong>
                   </p>
                   <label htmlFor="withdrawal-amount">Amount to withdraw ($)</label>
                   <div className="fund-form-controls">
@@ -1858,12 +2039,12 @@ function App() {
                     <button
                       type="submit"
                       className="confirm-button"
-                      disabled={!withdrawalAmount || !Number.isFinite(Number(withdrawalAmount)) || Number(withdrawalAmount) <= 0 || Number(withdrawalAmount) > walletBalance}
+                      disabled={isLoadingWallet || walletBalance == null || !withdrawalAmount || !Number.isFinite(Number(withdrawalAmount)) || Number(withdrawalAmount) <= 0 || Number(withdrawalAmount) > walletBalance}
                     >
                       Continue
                     </button>
                   </div>
-                  {(withdrawalError || (Number(withdrawalAmount) > walletBalance && withdrawalAmount)) && (
+                  {(withdrawalError || (walletBalance != null && Number(withdrawalAmount) > walletBalance && withdrawalAmount)) && (
                     <p className="fund-pin-error" role="alert">{withdrawalError || 'Amount exceeds your available balance.'}</p>
                   )}
                 </form>
@@ -2102,9 +2283,10 @@ function App() {
                 placeholder="0.00"
                 value={investmentAmounts[selectedStock.symbol] || ''}
                 onChange={(event) => updateInvestmentAmount(selectedStock.symbol, event.target.value)}
+                disabled={pendingBuySymbol === selectedStock.symbol}
               />
-              <button type="submit" className="confirm-button" disabled={!investmentAmounts[selectedStock.symbol] || Number(investmentAmounts[selectedStock.symbol]) <= 0}>
-                Confirm buy
+              <button type="submit" className="confirm-button" disabled={!investmentAmounts[selectedStock.symbol] || Number(investmentAmounts[selectedStock.symbol]) <= 0 || isLoadingWallet || walletBalance == null || Boolean(pendingBuySymbol)}>
+                {pendingBuySymbol === selectedStock.symbol ? 'Buying...' : isLoadingWallet ? 'Loading balance...' : 'Confirm buy'}
               </button>
             </div>
             {investmentAmounts[selectedStock.symbol] && Number(investmentAmounts[selectedStock.symbol]) > 0 && (
@@ -2184,7 +2366,15 @@ function App() {
       )}
 
       {(activeTab === 'home' || activeTab === 'portfolio') && (
-        <Portfolio holdings={Object.values(portfolio)} onSell={sellHolding} onStockSelect={setSelectedSymbol} />
+        <Portfolio
+          holdings={Object.values(portfolio)}
+          onSell={sellHolding}
+          onStockSelect={setSelectedSymbol}
+          isLoading={isLoadingPortfolio}
+          error={portfolioError}
+          pendingSellSymbol={pendingSellSymbol}
+          sellErrors={sellErrors}
+        />
       )}
 
       {(activeTab === 'home' || activeTab === 'watchlist') && (
@@ -2194,15 +2384,22 @@ function App() {
             <p className="eyebrow">PERSONAL PICKS</p>
             <h2 id="watchlist-heading">My Watchlist</h2>
           </div>
-          <span className="count-label">{watchlistedStocks.length} saved</span>
+          <span className="count-label">
+            {isLoadingWatchlist ? 'Loading...' : watchlistBusySymbol ? 'Saving...' : `${watchlistedStocks.length} saved`}
+          </span>
         </div>
-        {watchlistedStocks.length > 0 ? (
+        {isLoadingWatchlist ? (
+          <p className="empty-state" role="status">Loading watchlist...</p>
+        ) : watchlistError && watchlist.length === 0 ? (
+          <p className="empty-state" role="alert">{watchlistError}</p>
+        ) : watchlistedStocks.length > 0 ? (
           <div className="stock-list">
             {watchlistedStocks.map((stock) => <StockCard key={stock.symbol} stock={stock} />)}
           </div>
         ) : (
           <p className="empty-state">Star a stock below to keep it close.</p>
         )}
+        {watchlistError && watchlist.length > 0 && <p className="buy-error" role="alert">{watchlistError}</p>}
       </section>
       )}
 
