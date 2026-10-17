@@ -5,6 +5,7 @@ import Avatar from './Avatar.jsx'
 import Admin from './Admin.jsx'
 import CandlestickChart from './CandlestickChart.jsx'
 import ChatBubble from './ChatBubble.jsx'
+import Market from './Market.jsx'
 import Portfolio from './Portfolio.jsx'
 import Profile from './Profile.jsx'
 import logo from './assets/logo.webp'
@@ -904,6 +905,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('home')
   const [settingsReturnView, setSettingsReturnView] = useState({ tab: 'home', selectedSymbol: null })
   const [profileReturnView, setProfileReturnView] = useState({ tab: 'home', selectedSymbol: null })
+  const [marketReturnView, setMarketReturnView] = useState({ tab: 'home', selectedSymbol: null })
   const [aboutReturnView, setAboutReturnView] = useState({ tab: 'home', selectedSymbol: null })
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [adminAccess, setAdminAccess] = useState({ userId: null, isAdmin: false })
@@ -933,6 +935,13 @@ function App() {
   const openProfile = () => {
     if (activeTab !== 'profile') setProfileReturnView({ tab: activeTab, selectedSymbol })
     setActiveTab('profile')
+    setSelectedSymbol(null)
+    setIsMenuOpen(false)
+  }
+  const openMarket = () => {
+    if (activeTab === 'market') return
+    setMarketReturnView({ tab: activeTab, selectedSymbol })
+    setActiveTab('market')
     setSelectedSymbol(null)
     setIsMenuOpen(false)
   }
@@ -1241,16 +1250,19 @@ function App() {
     setBuyError((currentErrors) => ({ ...currentErrors, [symbol]: '' }))
   }
 
-  const confirmBuy = async (stock) => {
+  const confirmBuy = async (stock, quantityOverride) => {
     const amount = Number(investmentAmounts[stock.symbol])
     const currentPrice = Number(stock.price.replace('$', ''))
-    if (!user?.id || !Number.isFinite(amount) || amount <= 0 || pendingBuySymbol) return
+    const quantity = quantityOverride == null ? amount / currentPrice : Number(quantityOverride)
+    if (!user?.id || !Number.isFinite(quantity) || quantity <= 0 || pendingBuySymbol) {
+      return { success: false, error: 'Order is not valid.' }
+    }
     if (isLoadingWallet || walletBalance == null) {
-      setBuyError((currentErrors) => ({ ...currentErrors, [stock.symbol]: walletError || 'Wallet balance is unavailable.' }))
-      return
+      const message = walletError || 'Wallet balance is unavailable.'
+      setBuyError((currentErrors) => ({ ...currentErrors, [stock.symbol]: message }))
+      return { success: false, error: message }
     }
 
-    const quantity = amount / currentPrice
     const userId = user.id
     setPendingBuySymbol(stock.symbol)
     setBuyError((currentErrors) => ({ ...currentErrors, [stock.symbol]: '' }))
@@ -1273,19 +1285,24 @@ function App() {
       updateWalletBalance(Number(data))
       setConfirmedOrders((currentOrders) => ({ ...currentOrders, [stock.symbol]: true }))
       await refreshHoldings(userId)
+      return { success: true }
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not complete your purchase.'
       setBuyError((currentErrors) => ({
         ...currentErrors,
-        [stock.symbol]: error instanceof Error ? error.message : 'Could not complete your purchase.',
+        [stock.symbol]: message,
       }))
+      return { success: false, error: message }
     } finally {
       setPendingBuySymbol(null)
     }
   }
 
-  const sellHolding = async (symbol, shares) => {
+  const sellHolding = async (symbol, shares, returnDetails = false) => {
     const holding = portfolio[symbol]
-    if (!user?.id || !holding || !Number.isFinite(shares) || shares <= 0 || pendingSellSymbol) return false
+    if (!user?.id || !holding || !Number.isFinite(shares) || shares <= 0 || pendingSellSymbol) {
+      return returnDetails ? { success: false, error: 'Order is not valid.' } : false
+    }
 
     const userId = user.id
     setPendingSellSymbol(symbol)
@@ -1305,13 +1322,14 @@ function App() {
 
       updateWalletBalance(Number(data))
       await refreshHoldings(userId)
-      return true
+      return returnDetails ? { success: true } : true
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not complete your sale.'
       setSellErrors((currentErrors) => ({
         ...currentErrors,
-        [symbol]: error instanceof Error ? error.message : 'Could not complete your sale.',
+        [symbol]: message,
       }))
-      return false
+      return returnDetails ? { success: false, error: message } : false
     } finally {
       setPendingSellSymbol(null)
     }
@@ -1856,7 +1874,9 @@ function App() {
           <h1>Track what matters.</h1>
         </div>
         <div className="header-actions">
-          <span className="market-status"><i /> Market open</span>
+          <button type="button" className="market-status" aria-label="Open market" onClick={openMarket}>
+            <i /> Market open
+          </button>
         </div>
       </header>
         </>
@@ -1864,7 +1884,7 @@ function App() {
 
       {activeTab !== 'about' && authError && <p className="auth-error" role="alert">{authError}</p>}
 
-      {activeTab !== 'settings' && activeTab !== 'about' && activeTab !== 'admin' && <nav className="tab-nav" aria-label="Primary navigation">
+      {activeTab !== 'settings' && activeTab !== 'about' && activeTab !== 'admin' && activeTab !== 'market' && <nav className="tab-nav" aria-label="Primary navigation">
         {[
           ['home', 'Home'],
           ['watchlist', 'Watchlist'],
@@ -2270,7 +2290,7 @@ function App() {
         </section>
       )}
 
-      {selectedStock ? (
+      {activeTab !== 'market' && selectedStock ? (
         <section className="stock-detail" aria-labelledby="detail-heading">
           <button type="button" className="back-button" onClick={() => setSelectedSymbol(null)}>← Back</button>
           <div className="detail-heading">
@@ -2445,6 +2465,33 @@ function App() {
             setSelectedSymbol(null)
           }}
           onLogout={logOut}
+        />
+      )}
+
+      {activeTab === 'market' && (
+        <Market
+          userId={user.id}
+          stocks={stocks}
+          availableBalance={walletBalance}
+          isLoadingBalance={isLoadingWallet}
+          balanceError={walletError}
+          holdings={portfolio}
+          isLoadingHoldings={isLoadingPortfolio}
+          holdingsError={portfolioError}
+          pendingBuySymbol={pendingBuySymbol}
+          pendingSellSymbol={pendingSellSymbol}
+          selectedSymbol={selectedSymbol}
+          onSelectStock={setSelectedSymbol}
+          priceHistory={priceHistory}
+          ohlcHistory={ohlcHistory}
+          chartMode={chartMode}
+          onChartModeChange={setChartMode}
+          onBuy={confirmBuy}
+          onSell={(symbol, quantity) => sellHolding(symbol, quantity, true)}
+          onBack={() => {
+            setActiveTab(marketReturnView.tab)
+            setSelectedSymbol(marketReturnView.selectedSymbol)
+          }}
         />
       )}
 
