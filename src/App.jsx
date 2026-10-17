@@ -1875,7 +1875,12 @@ function App() {
         </div>
         <div className="header-actions">
           <button type="button" className="market-status" aria-label="Open market" onClick={openMarket}>
-            <i /> Market open
+            <i aria-hidden="true" />
+            <span className="market-status-label">Market open</span>
+            <span className="market-status-trade">· Trade</span>
+            <svg className="market-status-arrow" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <path d="m6 3 5 5-5 5" />
+            </svg>
           </button>
         </div>
       </header>
