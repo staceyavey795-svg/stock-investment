@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './supabaseClient.js'
 
-function Avatar({ userId, refreshKey = 0, className = '', label = 'Profile picture' }) {
+function Avatar({ userId, refreshKey = 0, className = '', label = 'Profile picture', fallbackName = '' }) {
   const [avatarUrl, setAvatarUrl] = useState('')
+  const nameParts = fallbackName.trim().split(/\s+/).filter(Boolean)
+  const initials = nameParts.length > 1
+    ? nameParts.slice(0, 2).map((part) => part.charAt(0)).join('').toUpperCase()
+    : (nameParts[0] ?? '').slice(0, 2).toUpperCase()
 
   useEffect(() => {
     let isMounted = true
@@ -33,6 +37,8 @@ function Avatar({ userId, refreshKey = 0, className = '', label = 'Profile pictu
     <div className={`user-avatar ${className}`.trim()} role="img" aria-label={label}>
       {avatarUrl ? (
         <img src={avatarUrl} alt="" />
+      ) : initials ? (
+        <span className="user-avatar-initials" aria-hidden="true">{initials}</span>
       ) : (
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <circle cx="12" cy="8" r="3.5" />

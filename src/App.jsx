@@ -903,6 +903,7 @@ function App() {
   const [authView, setAuthView] = useState(() => getInitialAuthUrlState().hasError ? 'expired' : 'login')
   const [activeTab, setActiveTab] = useState('home')
   const [settingsReturnView, setSettingsReturnView] = useState({ tab: 'home', selectedSymbol: null })
+  const [profileReturnView, setProfileReturnView] = useState({ tab: 'home', selectedSymbol: null })
   const [aboutReturnView, setAboutReturnView] = useState({ tab: 'home', selectedSymbol: null })
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [adminAccess, setAdminAccess] = useState({ userId: null, isAdmin: false })
@@ -928,6 +929,13 @@ function App() {
   const isLoadingWallet = Boolean(user?.id) && walletState.userId !== user.id
   const walletError = walletState.userId === user?.id ? walletState.error : ''
   const walletBalanceRef = useRef(0)
+
+  const openProfile = () => {
+    if (activeTab !== 'profile') setProfileReturnView({ tab: activeTab, selectedSymbol })
+    setActiveTab('profile')
+    setSelectedSymbol(null)
+    setIsMenuOpen(false)
+  }
   const [isFunding, setIsFunding] = useState(false)
   const [fundingAmount, setFundingAmount] = useState('')
   const [fundingStep, setFundingStep] = useState('amount')
@@ -1748,7 +1756,18 @@ function App() {
         <span />
         <span />
       </button>
-      <Avatar userId={user.id} refreshKey={avatarRefreshKey} className="app-user-avatar" />
+      <button
+        type="button"
+        className="app-user-avatar-button"
+        aria-label="Open profile"
+        onClick={openProfile}
+      >
+        <Avatar
+          userId={user.id}
+          refreshKey={avatarRefreshKey}
+          fallbackName={user.user_metadata?.full_name || user.user_metadata?.username || user.email || ''}
+        />
+      </button>
       <img className="app-header-logo" src={logo} alt="GX Trading logo" />
       <button
         type="button"
@@ -1788,11 +1807,7 @@ function App() {
           <button
             type="button"
             tabIndex={isMenuOpen ? 0 : -1}
-            onClick={() => {
-              setActiveTab('profile')
-              setSelectedSymbol(null)
-              setIsMenuOpen(false)
-            }}
+            onClick={openProfile}
           >
             Profile
           </button>
@@ -2417,8 +2432,19 @@ function App() {
       {activeTab === 'profile' && (
         <Profile
           userId={user.id}
+          email={user.email}
           avatarRefreshKey={avatarRefreshKey}
           onAvatarUpdated={() => setAvatarRefreshKey((key) => key + 1)}
+          onBack={() => {
+            setActiveTab(profileReturnView.tab)
+            setSelectedSymbol(profileReturnView.selectedSymbol)
+          }}
+          onSettings={() => {
+            setSettingsReturnView({ tab: 'profile', selectedSymbol: null })
+            setActiveTab('settings')
+            setSelectedSymbol(null)
+          }}
+          onLogout={logOut}
         />
       )}
 

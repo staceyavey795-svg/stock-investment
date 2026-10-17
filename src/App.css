@@ -3,7 +3,11 @@
 .user-avatar { display: grid; overflow: hidden; width: 44px; height: 44px; flex: 0 0 44px; place-items: center; border: 1px solid var(--border); border-radius: 50%; color: var(--muted); background: var(--bg); }
 .user-avatar img { width: 100%; height: 100%; object-fit: cover; }
 .user-avatar svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
-.app-user-avatar { position: fixed; z-index: 1002; top: 16px; right: 16px; left: auto; }
+.user-avatar-initials { color: var(--ink); font-size: 14px; font-weight: 700; line-height: 1; }
+.app-user-avatar-button { position: fixed; z-index: 1002; top: 16px; right: 16px; left: auto; display: grid; width: 44px; height: 44px; padding: 0; place-items: center; border: 0; border-radius: 50%; background: transparent; cursor: pointer; -webkit-tap-highlight-color: transparent; transition: box-shadow 160ms ease, transform 160ms ease; }
+.app-user-avatar-button:hover { box-shadow: 0 0 0 4px var(--green-soft); }
+.app-user-avatar-button:active { transform: scale(.94); }
+.app-user-avatar-button:focus-visible { outline: 2px solid var(--green); outline-offset: 4px; }
 .app-header-logo { position: fixed; z-index: 1002; top: 13px; left: 50%; width: 90px; max-width: min(90px, calc(100vw - 140px)); height: 50px; object-fit: contain; mix-blend-mode: multiply; transform: translateX(-50%); }
 .menu-toggle span { width: 19px; height: 2px; border-radius: 2px; background: var(--ink); transition: transform 220ms ease, opacity 160ms ease; }
 .menu-toggle.is-open span:first-child { transform: translateY(7px) rotate(45deg); }
@@ -146,20 +150,29 @@ h2 { font-size: 28px; }
 .stocks-section { padding-top: 56px; }
 .portfolio-section { padding-top: 42px; }
 .profile-section { padding-top: 42px; }
+.profile-back-button { margin-bottom: 20px; }
 .profile-heading { align-items: center; }
 .profile-avatar-control { position: relative; }
-.profile-avatar-button { position: relative; display: block; width: 76px; height: 76px; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
-.profile-avatar-button .user-avatar { width: 76px; height: 76px; }
+.profile-avatar-button { position: relative; display: block; width: 96px; height: 96px; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+.profile-avatar-button .user-avatar { width: 96px; height: 96px; flex-basis: 96px; }
+.profile-avatar-button .user-avatar-initials { font-size: 24px; }
 .profile-avatar-camera { position: absolute; right: 0; bottom: 0; display: grid; width: 28px; height: 28px; place-items: center; border: 2px solid var(--surface); border-radius: 50%; color: var(--surface); background: var(--green); }
 .profile-avatar-camera svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
 .profile-avatar-button:hover .profile-avatar-camera { background: var(--ink); }
 .profile-avatar-button:focus-visible { outline: 2px solid var(--green); outline-offset: 4px; }
 .profile-avatar-button:disabled { cursor: wait; opacity: .65; }
+.profile-photo-change-button { display: block; margin: 10px auto 0; padding: 2px 0; border: 0; color: var(--green); background: transparent; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.profile-photo-change-button:hover { color: var(--ink); }
+.profile-photo-change-button:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.profile-photo-change-button:disabled { cursor: wait; opacity: .65; }
 .profile-avatar-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
 .profile-panel { max-width: 560px; }
 .profile-detail + .profile-detail { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--border); }
 .profile-detail h3 { margin: 0 0 6px; color: var(--muted); font-size: 12px; font-weight: 700; }
 .profile-detail p { margin: 0; color: var(--ink); font-size: 15px; }
+.profile-navigation-actions { display: flex; max-width: 560px; gap: 12px; margin-top: 20px; }
+.profile-navigation-actions .fund-back-button, .profile-navigation-actions .settings-logout-button { flex: 1; min-height: 48px; }
+.profile-navigation-actions .settings-logout-button { width: auto; margin-top: 0; }
 .section-heading { margin-bottom: 18px; }
 .count-label { color: var(--muted); font-size: 13px; }
 .portfolio-total { display: grid; gap: 3px; text-align: right; }
@@ -274,7 +287,7 @@ h2 { font-size: 28px; }
 @media (max-width: 560px) { .detail-heading { align-items: flex-start; flex-direction: column; } .detail-price { justify-items: start; } .detail-chart { height: 270px; padding: 16px 10px 8px; } .detail-buy-form { padding: 16px; } }
 @media (max-width: 680px) { .settings-card-grid { grid-template-columns: 1fr; } .settings-card { padding: 18px; } .settings-history-card { grid-column: auto; } .settings-card-heading { align-items: flex-start; flex-direction: column; } .settings-history-button { width: 100%; } .settings-transaction-list li { align-items: flex-start; } }
 @media (max-width: 560px) { .about-app-shell { padding: 18px 18px 60px; } .about-page { padding-top: 0; } .about-back-button { margin-bottom: 20px; } .about-content { gap: 23px; } .about-content > h2 { font-size: 27px; } .about-introduction, .about-copy-section { gap: 10px; } .about-introduction p, .about-copy-section p, .about-copy-section ul, .about-closing { font-size: 14px; line-height: 1.7; } }
-@media (max-width: 560px) { .app-user-avatar { right: 18px; } }
+@media (max-width: 560px) { .app-user-avatar-button { right: 18px; } }
 @media (max-width: 560px) { .app-shell { padding: 36px 18px 60px; } .app-header { align-items: flex-start; gap: 20px; flex-direction: column; padding-bottom: 34px; } .stock-card { padding-left: 14px; } .stock-value { gap: 10px; margin-right: 8px; } .stock-name { max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .stock-row { flex-wrap: wrap; gap: 8px; } .stock-value { margin-left: auto; } .buy-button { margin-right: 0; } .buy-form { flex-basis: 100%; } .buy-form-controls, .fund-form-controls, .sell-form-controls { flex-wrap: wrap; } .portfolio-table-header { display: none; } .portfolio-row { grid-template-columns: 1.2fr 1fr; gap: 8px; padding: 14px; } .portfolio-row > :not(:first-child) { text-align: right; } .portfolio-row > :nth-child(3)::before { content: 'Avg: '; color: var(--muted); font-size: 11px; } .portfolio-row > :nth-child(4)::before { content: 'Value: '; color: var(--muted); font-size: 11px; } .portfolio-total strong { font-size: 18px; } .wallet-panel { grid-template-columns: 1fr; margin-top: 24px; } .wallet-actions { flex-wrap: wrap; } .fund-button { justify-self: start; } .withdrawal-history-row { grid-template-columns: 1fr 1fr; gap: 4px 10px; } .withdrawal-history-row time { grid-column: 1 / -1; text-align: left; font-size: 11px; } .sell-form { margin: 0 14px; } }
 
 .admin-page { display: grid; gap: 18px; padding-top: 36px; }
